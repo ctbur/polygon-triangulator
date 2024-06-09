@@ -1,11 +1,49 @@
+mod showcase;
 mod vector2;
 
-use std::mem::{self, swap};
+use std::mem;
 
+use self::showcase::Showcase;
 use self::vector2::Vector2f;
 use raylib::prelude::*;
 
 fn main() {
+    let mut polygon = Polygon::new();
+
+    polygon.move_to(100.0, 100.0);
+    polygon.line_to(500.0, 100.0);
+    polygon.line_to(500.0, 500.0);
+    polygon.line_to(100.0, 800.0);
+
+    // draw a triangle inside the previous polygon
+    polygon.move_to(200.0, 200.0);
+    polygon.line_to(400.0, 200.0);
+    polygon.line_to(300.0, 1000.0);
+
+    // draw another triangle
+    polygon.move_to(500.0, 200.0);
+    polygon.line_to(500.0, 300.0);
+    polygon.line_to(700.0, 250.0);
+
+    // draw another triangle
+    polygon.move_to(100.0, 600.0);
+    polygon.line_to(100.0, 1000.0);
+    polygon.line_to(700.0, 800.0);
+
+    // draw a rectangle with rounded corners
+    let mut rect = Polygon::new();
+    rect.move_to(100.0, 100.0);
+    rect.line_to(500.0, 100.0);
+    rect.quad_bezier_curve_to(600.0, 100.0, 600.0, 200.0, 50);
+    rect.line_to(600.0, 500.0);
+    rect.quad_bezier_curve_to(600.0, 600.0, 500.0, 600.0, 50);
+    rect.line_to(100.0, 600.0);
+    rect.quad_bezier_curve_to(0.0, 600.0, 0.0, 500.0, 50);
+    rect.line_to(0.0, 200.0);
+    rect.quad_bezier_curve_to(0.0, 100.0, 100.0, 100.0, 50);
+
+    let mut intersections_showcase = showcase::IntersectionsShowcase::new(polygon);
+
     let (mut rl, thread) = raylib::init()
         .size(2500, 1500)
         .title("Hello, World")
@@ -13,64 +51,7 @@ fn main() {
 
     while !rl.window_should_close() {
         let mut d = rl.begin_drawing(&thread);
-
-        d.clear_background(Color::WHITE);
-        d.draw_text("Hello, world!", 12, 12, 100, Color::BLACK);
-
-        let mut polygon = Polygon::new();
-
-        polygon.move_to(100.0, 100.0);
-        polygon.line_to(500.0, 100.0);
-        polygon.line_to(500.0, 500.0);
-        polygon.line_to(100.0, 800.0);
-
-        // draw a triangle inside the previous polygon
-        polygon.move_to(200.0, 200.0);
-        polygon.line_to(400.0, 200.0);
-        polygon.line_to(300.0, 400.0);
-
-        // draw a rectangle with rounded corners
-        let mut rect = Polygon::new();
-        rect.move_to(100.0, 100.0);
-        rect.line_to(500.0, 100.0);
-        rect.quad_bezier_curve_to(600.0, 100.0, 600.0, 200.0, 50);
-        rect.line_to(600.0, 500.0);
-        rect.quad_bezier_curve_to(600.0, 600.0, 500.0, 600.0, 50);
-        rect.line_to(100.0, 600.0);
-        rect.quad_bezier_curve_to(0.0, 600.0, 0.0, 500.0, 50);
-        rect.line_to(0.0, 200.0);
-        rect.quad_bezier_curve_to(0.0, 100.0, 100.0, 100.0, 50);
-
-        draw_polygon(&mut d, &polygon, Vector2f::new(0.0, 0.0));
-        draw_polygon(&mut d, &rect, Vector2f::new(700.0, 0.0));
-
-        // discretize polygons and draw them a bit further down
-        let scale_factor = 10.0;
-        let discrete_polygon = discretize(&polygon, scale_factor);
-        let discrete_rect = discretize(&rect, scale_factor);
-
-        draw_discrete_polygon(
-            &mut d,
-            &discrete_polygon,
-            Vector2::new(0.0, 700.0),
-            scale_factor,
-        );
-        draw_discrete_polygon(
-            &mut d,
-            &discrete_rect,
-            Vector2::new(700.0, 700.0),
-            scale_factor,
-        );
-    }
-}
-
-fn draw_polygon(d: &mut RaylibDrawHandle, polygon: &Polygon, offset: Vector2f) {
-    for contour in &polygon.contours {
-        for i in 0..contour.len() {
-            let start = contour[i];
-            let end = contour[(i + 1) % contour.len()];
-            d.draw_line_ex(start + offset, end + offset, 1.0, Color::BLACK);
-        }
+        intersections_showcase.render(&mut d);
     }
 }
 
@@ -172,6 +153,34 @@ enum SegmentIntersection {
     None,
     Point(Vector2f),
     Segment(Vector2f, Vector2f),
+}
+
+fn find_intersections(polygon: &Polygon, epsilon: f32) -> Vec<SegmentIntersection> {
+    let mut intersections = Vec::new();
+
+    for i in 0..polygon.contours.len() {
+        for j in i + 1..polygon.contours.len() {
+            let contour = &polygon.contours[i];
+            let other_contour = &polygon.contours[j];
+
+            for k in 0..contour.len() {
+                let p0 = contour[k];
+                let p1 = contour[(k + 1) % contour.len()];
+
+                for l in 0..other_contour.len() {
+                    let p2 = other_contour[l];
+                    let p3 = other_contour[(l + 1) % other_contour.len()];
+
+                    match intersect_segments(p0, p1, p2, p3, epsilon) {
+                        SegmentIntersection::None => {}
+                        intersection => intersections.push(intersection),
+                    }
+                }
+            }
+        }
+    }
+
+    intersections
 }
 
 fn intersect_segments(
