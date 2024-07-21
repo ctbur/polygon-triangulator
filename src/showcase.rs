@@ -241,13 +241,13 @@ pub fn get_rounded_rect() -> Polygon {
     let radius = 100.0;
 
     polygon.move_to(radius, 0.0);
-    polygon.quad_bezier_curve_to(radius, 0.0, 0.0, radius, 10);
+    polygon.quad_bezier_curve_to(0.0, 0.0, 0.0, radius, 10);
     polygon.line_to(0.0, height - radius);
-    polygon.quad_bezier_curve_to(0.0, height - radius, radius, height, 10);
+    polygon.quad_bezier_curve_to(0.0, height, radius, height, 10);
     polygon.line_to(width - radius, height);
-    polygon.quad_bezier_curve_to(width - radius, height, width, height - radius, 10);
+    polygon.quad_bezier_curve_to(width, height, width, height - radius, 10);
     polygon.line_to(width, radius);
-    polygon.quad_bezier_curve_to(width, radius, width - radius, 0.0, 10);
+    polygon.quad_bezier_curve_to(width, 0.0, width - radius, 0.0, 10);
     polygon.line_to(radius, 0.0);
 
     polygon
@@ -260,13 +260,17 @@ pub fn get_star() -> Polygon {
     let radius = 100.0;
     let center = Vector2f::new(400.0, 400.0);
 
-    polygon.move_to(center.x, center.y - radius);
     for i in 0..points * 2 {
         let angle = 2.0 * std::f32::consts::PI / (points * 2) as f32 * i as f32;
         let length = if i % 2 == 0 { radius } else { radius / 2.0 };
         let x = center.x + angle.cos() * length;
         let y = center.y + angle.sin() * length;
-        polygon.line_to(x, y);
+
+        if i == 0 {
+            polygon.move_to(x, y);
+        } else {
+            polygon.line_to(x, y);
+        }
     }
 
     polygon
@@ -275,18 +279,22 @@ pub fn get_star() -> Polygon {
 pub fn get_grid() -> Polygon {
     let mut polygon = Polygon::new();
 
+    let cell_size = 50.0;
     let width = 800.0;
     let height = 800.0;
-    let cell_size = 50.0;
 
-    for x in (0..(width as i32)).step_by(cell_size as usize) {
-        polygon.move_to(x as f32, 0.0);
-        polygon.line_to(x as f32, height);
-    }
-
-    for y in (0..(height as i32)).step_by(cell_size as usize) {
-        polygon.move_to(0.0, y as f32);
-        polygon.line_to(width, y as f32);
+    let num_rows = (height / cell_size) as usize;
+    let num_cols = (width / cell_size) as usize;
+    polygon.move_to(0.0, 0.0);
+    for row in 0..num_rows {
+        for col in 0..num_cols {
+            let x = col as f32 * cell_size;
+            let y = row as f32 * cell_size;
+            polygon.line_to(x, y);
+            polygon.line_to(x + cell_size, y);
+            polygon.line_to(x + cell_size, y + cell_size);
+            polygon.line_to(x, y + cell_size);
+        }
     }
 
     polygon
