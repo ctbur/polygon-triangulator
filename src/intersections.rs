@@ -1,7 +1,14 @@
+use std::collections::HashMap;
 use std::mem;
 
 use crate::polygon::Polygon;
 use crate::vector2::Vector2f;
+
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
+pub struct SegmentId {
+    pub contour: usize,
+    pub segment: usize,
+}
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum SegmentIntersection {
@@ -10,8 +17,11 @@ pub enum SegmentIntersection {
     Segment(Vector2f, Vector2f),
 }
 
-pub fn find_intersections(polygon: &Polygon, epsilon: f32) -> Vec<SegmentIntersection> {
-    let mut intersections = Vec::new();
+pub fn find_intersections(
+    polygon: &Polygon,
+    epsilon: f32,
+) -> HashMap<SegmentId, Vec<SegmentIntersection>> {
+    let mut intersections = HashMap::new();
 
     let contours = polygon.contours();
     for i in 0..contours.len() {
@@ -33,7 +43,25 @@ pub fn find_intersections(polygon: &Polygon, epsilon: f32) -> Vec<SegmentInterse
 
                     match intersect_segments(p0, p1, p2, p3, epsilon) {
                         SegmentIntersection::None => {}
-                        intersection => intersections.push(intersection),
+                        intersection => {
+                            let seg_id1 = SegmentId {
+                                contour: i,
+                                segment: k,
+                            };
+                            intersections
+                                .entry(seg_id1)
+                                .or_insert_with(Vec::new)
+                                .push(intersection);
+
+                            let seg_id2 = SegmentId {
+                                contour: j,
+                                segment: l,
+                            };
+                            intersections
+                                .entry(seg_id2)
+                                .or_insert_with(Vec::new)
+                                .push(intersection);
+                        }
                     }
                 }
             }

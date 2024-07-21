@@ -1,13 +1,15 @@
+use std::collections::HashMap;
+
 use raylib::prelude::*;
 
-use crate::intersections::{self, SegmentIntersection};
+use crate::intersections::{self, SegmentId, SegmentIntersection};
 use crate::{vector2::Vector2f, Polygon};
 
 pub struct Showcase {
     raylib_handle: RaylibHandle,
     raylib_thread: RaylibThread,
     polygons: Vec<Polygon>,
-    intersections: Vec<Vec<SegmentIntersection>>,
+    intersections: Vec<HashMap<SegmentId, Vec<SegmentIntersection>>>,
     selected_polygon: usize,
     camera: Camera2D,
 }
@@ -109,7 +111,7 @@ impl Showcase {
             self.camera.zoom = 1.0;
         }
 
-        self.camera.offset += offset;
+        self.camera.offset += offset * self.raylib_handle.get_frame_time() * 60.0;
     }
 
     fn render(&mut self) {
@@ -132,57 +134,73 @@ impl Showcase {
 }
 
 fn draw_polygon<'a, T>(d: &mut RaylibMode2D<'a, T>, polygon: &Polygon, offset: Vector2f) {
-    for contour in polygon.contours() {
-        for i in 0..contour.len() {
-            let start = contour[i];
-            let end = contour[(i + 1) % contour.len()];
-            d.draw_line_ex(start + offset, end + offset, 4.0, Color::BLACK);
+    let colors = [
+        Color::RED,
+        Color::BLUE,
+        Color::GREEN,
+        Color::ORANGE,
+        Color::PURPLE,
+        Color::PINK,
+    ];
+
+    for (i, contour) in polygon.contours().iter().enumerate() {
+        for j in 0..contour.len() {
+            let start = contour[j];
+            let end = contour[(j + 1) % contour.len()];
+            d.draw_line_ex(start + offset, end + offset, 4.0, colors[i % colors.len()]);
         }
     }
 }
 
 fn draw_intersections<'a, T>(
     d: &mut RaylibMode2D<'a, T>,
-    intersections: &[SegmentIntersection],
+    intersections: &HashMap<SegmentId, Vec<SegmentIntersection>>,
     offset: Vector2f,
 ) {
     let scale = 4.0;
-    for intersection in intersections {
-        match intersection {
-            &SegmentIntersection::Point(p) => {
-                d.draw_ring(
-                    p + offset,
-                    4.0 * scale,
-                    5.0 * scale,
-                    0.0,
-                    360.0,
-                    20,
-                    Color::GREEN.alpha(0.5),
-                );
-            }
-            &SegmentIntersection::Segment(p0, p1) => {
-                d.draw_ring(
-                    p0 + offset,
-                    4.0 * scale,
-                    5.0 * scale,
-                    0.0,
-                    360.0,
-                    20,
-                    Color::BLUE.alpha(0.5),
-                );
-                d.draw_ring(
-                    p1 + offset,
-                    4.0 * scale,
-                    5.0 * scale,
-                    0.0,
-                    360.0,
-                    20,
-                    Color::BLUE.alpha(0.5),
-                );
-                d.draw_line_ex(p0 + offset, p1 + offset, 1.0 * scale, Color::BLUE);
-            }
-            _ => {
-                panic!();
+    for (_, intersections) in intersections {
+        for intersection in intersections {
+            match intersection {
+                &SegmentIntersection::Point(p) => {
+                    d.draw_ring(
+                        p + offset,
+                        4.0 * scale,
+                        5.0 * scale,
+                        0.0,
+                        360.0,
+                        20,
+                        Color::BLACK.alpha(0.3),
+                    );
+                }
+                &SegmentIntersection::Segment(p0, p1) => {
+                    d.draw_ring(
+                        p0 + offset,
+                        4.0 * scale,
+                        5.0 * scale,
+                        0.0,
+                        360.0,
+                        20,
+                        Color::BLACK.alpha(0.3),
+                    );
+                    d.draw_ring(
+                        p1 + offset,
+                        4.0 * scale,
+                        5.0 * scale,
+                        0.0,
+                        360.0,
+                        20,
+                        Color::BLACK.alpha(0.3),
+                    );
+                    d.draw_line_ex(
+                        p0 + offset,
+                        p1 + offset,
+                        1.0 * scale,
+                        Color::BLACK.alpha(0.6),
+                    );
+                }
+                _ => {
+                    panic!();
+                }
             }
         }
     }
@@ -207,6 +225,17 @@ fn draw_intersections<'a, T>(
         }
     }
 }*/
+
+pub fn get_self_overlapping_contour() -> Polygon {
+    let mut polygon = Polygon::new();
+
+    polygon.move_to(100.0, 100.0);
+    polygon.line_to(500.0, 100.0);
+    polygon.line_to(100.0, 500.0);
+    polygon.line_to(500.0, 500.0);
+
+    polygon
+}
 
 pub fn get_arbitrary_polygon() -> Polygon {
     let mut polygon = Polygon::new();

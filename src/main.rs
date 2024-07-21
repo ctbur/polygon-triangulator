@@ -12,6 +12,7 @@ fn main() {
         .build();
 
     let polygons = vec![
+        showcase::get_self_overlapping_contour(),
         showcase::get_arbitrary_polygon(),
         showcase::get_star(),
         showcase::get_rounded_rect(),
