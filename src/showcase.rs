@@ -1,35 +1,47 @@
 use raylib::prelude::*;
 
-use crate::{find_intersections, vector2::Vector2f, Polygon, SegmentIntersection};
+use crate::intersections::{self, SegmentIntersection};
+use crate::{vector2::Vector2f, Polygon};
 
-use super::Showcase;
-
-pub struct IntersectionsShowcase {
+pub struct Showcase {
+    raylib_handle: RaylibHandle,
+    raylib_thread: RaylibThread,
     polygon: Polygon,
     intersections: Vec<SegmentIntersection>,
 }
 
-impl IntersectionsShowcase {
-    pub fn new(polygon: Polygon) -> IntersectionsShowcase {
-        let intersections = find_intersections(&polygon, 0.001);
-        IntersectionsShowcase {
+impl Showcase {
+    pub fn new(
+        raylib_handle: RaylibHandle,
+        raylib_thread: RaylibThread,
+        polygon: Polygon,
+    ) -> Showcase {
+        let intersections = intersections::find_intersections(&polygon, 0.001);
+        Showcase {
+            raylib_handle,
+            raylib_thread,
             polygon,
             intersections,
         }
     }
-}
 
-impl Showcase for IntersectionsShowcase {
-    fn render(&mut self, d: &mut RaylibDrawHandle) {
+    pub fn process(&mut self) -> bool {
+        if self.raylib_handle.window_should_close() {
+            return false;
+        }
+
+        let mut d = self.raylib_handle.begin_drawing(&self.raylib_thread);
+
         d.clear_background(Color::WHITE);
+        draw_polygon(&mut d, &self.polygon, Vector2f::new(0.0, 0.0));
+        draw_intersections(&mut d, &self.intersections, Vector2f::new(0.0, 0.0));
 
-        draw_polygon(d, &self.polygon, Vector2f::new(0.0, 0.0));
-        draw_intersections(d, &self.intersections, Vector2f::new(0.0, 0.0));
+        return true;
     }
 }
 
 fn draw_polygon(d: &mut RaylibDrawHandle, polygon: &Polygon, offset: Vector2f) {
-    for contour in &polygon.contours {
+    for contour in polygon.contours() {
         for i in 0..contour.len() {
             let start = contour[i];
             let end = contour[(i + 1) % contour.len()];
@@ -79,8 +91,28 @@ fn draw_intersections(
                 d.draw_line_ex(p0 + offset, p1 + offset, 1.0 * scale, Color::BLUE);
             }
             _ => {
-                panic!("reeear");
+                panic!();
             }
         }
     }
 }
+
+/*fn draw_discrete_polygon(
+    d: &mut RaylibDrawHandle,
+    polygon: &DiscretePolygon,
+    offset: Vector2,
+    scale_factor: f32,
+) {
+    for contour in &polygon.contours {
+        for i in 0..contour.len() {
+            let (x0, y0) = contour[i];
+            let (x1, y1) = contour[(i + 1) % contour.len()];
+            d.draw_line_ex(
+                Vector2::new(x0 as f32, y0 as f32) / scale_factor + offset,
+                Vector2::new(x1 as f32, y1 as f32) / scale_factor + offset,
+                1.0,
+                Color::BLACK,
+            );
+        }
+    }
+}*/
