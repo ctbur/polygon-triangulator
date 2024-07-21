@@ -115,6 +115,7 @@ impl Showcase {
     fn render(&mut self) {
         let mut d = self.raylib_handle.begin_drawing(&self.raylib_thread);
         d.clear_background(Color::WHITE);
+        d.draw_fps(10, 10);
 
         let mut c = d.begin_mode2D(self.camera);
         draw_polygon(

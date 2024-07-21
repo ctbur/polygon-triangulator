@@ -15,7 +15,7 @@ pub fn find_intersections(polygon: &Polygon, epsilon: f32) -> Vec<SegmentInterse
 
     let contours = polygon.contours();
     for i in 0..contours.len() {
-        for j in i + 1..contours.len() {
+        for j in i..contours.len() {
             let contour = &contours[i];
             let other_contour = &contours[j];
 
@@ -24,6 +24,10 @@ pub fn find_intersections(polygon: &Polygon, epsilon: f32) -> Vec<SegmentInterse
                 let p1 = contour[(k + 1) % contour.len()];
 
                 for l in 0..other_contour.len() {
+                    if i == j && k == l {
+                        continue;
+                    }
+
                     let p2 = other_contour[l];
                     let p3 = other_contour[(l + 1) % other_contour.len()];
 
