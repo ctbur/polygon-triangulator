@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use raylib::prelude::*;
 
+use crate::graph::{self, Graph};
 use crate::intersections::{self, SegmentId, SegmentIntersection};
 use crate::{vector2::Vector2f, Polygon};
 
@@ -10,6 +11,7 @@ pub struct Showcase {
     raylib_thread: RaylibThread,
     polygons: Vec<Polygon>,
     intersections: Vec<HashMap<SegmentId, Vec<SegmentIntersection>>>,
+    graphs: Vec<Graph>,
     selected_polygon: usize,
     camera: Camera2D,
 }
@@ -20,9 +22,16 @@ impl Showcase {
         raylib_thread: RaylibThread,
         polygons: Vec<Polygon>,
     ) -> Showcase {
+        // find intersections for all polygons
         let mut intersections = Vec::new();
         for polygon in &polygons {
             intersections.push(intersections::find_intersections(polygon, 0.01));
+        }
+
+        // build graphs for all polygons
+        let mut graphs = Vec::new();
+        for (polygon, intersections) in polygons.iter().zip(intersections.iter()) {
+            graphs.push(graph::build_graph(&polygon, &intersections, 0.01));
         }
 
         let camera = Camera2D {
@@ -36,6 +45,7 @@ impl Showcase {
             raylib_thread,
             polygons,
             intersections,
+            graphs,
             selected_polygon: 0,
             camera,
         }

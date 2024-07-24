@@ -1,3 +1,4 @@
+mod graph;
 mod intersections;
 mod polygon;
 mod showcase;
