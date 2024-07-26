@@ -1,10 +1,24 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use raylib::prelude::*;
 
 use crate::graph::{self, Graph};
 use crate::intersections::{self, SegmentId, SegmentIntersection};
 use crate::{vector2::Vector2f, Polygon};
+
+enum DrawingMode {
+    Contours,
+    Graph,
+}
+
+const COLOR_SEQUENCE: [Color; 6] = [
+    Color::RED,
+    Color::BLUE,
+    Color::GREEN,
+    Color::ORANGE,
+    Color::PURPLE,
+    Color::PINK,
+];
 
 pub struct Showcase {
     raylib_handle: RaylibHandle,
@@ -13,6 +27,7 @@ pub struct Showcase {
     intersections: Vec<HashMap<SegmentId, Vec<SegmentIntersection>>>,
     graphs: Vec<Graph>,
     selected_polygon: usize,
+    drawing_mode: DrawingMode,
     camera: Camera2D,
 }
 
@@ -47,6 +62,7 @@ impl Showcase {
             intersections,
             graphs,
             selected_polygon: 0,
+            drawing_mode: DrawingMode::Contours,
             camera,
         }
     }
@@ -96,6 +112,13 @@ impl Showcase {
             }
         }
 
+        // select drawing mode
+        if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_C) {
+            self.drawing_mode = DrawingMode::Contours;
+        } else if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_G) {
+            self.drawing_mode = DrawingMode::Graph;
+        }
+
         // move camera with arrow keys
         let mut offset = Vector2::new(0.0, 0.0);
         if self.raylib_handle.is_key_down(KeyboardKey::KEY_LEFT) {
@@ -130,11 +153,12 @@ impl Showcase {
         d.draw_fps(10, 10);
 
         let mut c = d.begin_mode2D(self.camera);
-        draw_polygon(
-            &mut c,
-            &self.polygons[self.selected_polygon],
-            Vector2f::new(0.0, 0.0),
-        );
+
+        match self.drawing_mode {
+            DrawingMode::Contours => draw_polygon(&mut c, &self.polygons[self.selected_polygon]),
+            DrawingMode::Graph => draw_graph(&mut c, &self.graphs[self.selected_polygon]),
+        }
+
         draw_intersections(
             &mut c,
             &self.intersections[self.selected_polygon],
@@ -143,22 +167,44 @@ impl Showcase {
     }
 }
 
-fn draw_polygon<'a, T>(d: &mut RaylibMode2D<'a, T>, polygon: &Polygon, offset: Vector2f) {
-    let colors = [
-        Color::RED,
-        Color::BLUE,
-        Color::GREEN,
-        Color::ORANGE,
-        Color::PURPLE,
-        Color::PINK,
-    ];
-
+fn draw_polygon<'a, T>(d: &mut RaylibMode2D<'a, T>, polygon: &Polygon) {
     for (i, contour) in polygon.contours().iter().enumerate() {
         for j in 0..contour.len() {
             let start = contour[j];
             let end = contour[(j + 1) % contour.len()];
-            d.draw_line_ex(start + offset, end + offset, 4.0, colors[i % colors.len()]);
+            d.draw_line_ex(start, end, 4.0, COLOR_SEQUENCE[i % COLOR_SEQUENCE.len()]);
         }
+    }
+}
+
+fn draw_graph<'a, T>(d: &mut RaylibMode2D<'a, T>, graph: &Graph) {
+    let mut visited_nodes = HashSet::new();
+    let mut node_stack = Vec::new();
+
+    let nodes = graph.nodes();
+    node_stack.push(0);
+    let mut i = 0;
+    while let Some(node_idx) = node_stack.pop() {
+        let node = &nodes[node_idx];
+
+        for other_node_idx in &node.edges {
+            if visited_nodes.contains(other_node_idx) {
+                continue;
+            }
+
+            let other_node = &nodes[*other_node_idx];
+            d.draw_line_ex(
+                node.position,
+                other_node.position,
+                4.0,
+                COLOR_SEQUENCE[i % COLOR_SEQUENCE.len()],
+            );
+            i += 1;
+
+            node_stack.push(*other_node_idx);
+        }
+
+        visited_nodes.insert(node_idx);
     }
 }
 
@@ -215,26 +261,6 @@ fn draw_intersections<'a, T>(
         }
     }
 }
-
-/*fn draw_discrete_polygon(
-    d: &mut RaylibDrawHandle,
-    polygon: &DiscretePolygon,
-    offset: Vector2,
-    scale_factor: f32,
-) {
-    for contour in &polygon.contours {
-        for i in 0..contour.len() {
-            let (x0, y0) = contour[i];
-            let (x1, y1) = contour[(i + 1) % contour.len()];
-            d.draw_line_ex(
-                Vector2::new(x0 as f32, y0 as f32) / scale_factor + offset,
-                Vector2::new(x1 as f32, y1 as f32) / scale_factor + offset,
-                1.0,
-                Color::BLACK,
-            );
-        }
-    }
-}*/
 
 pub fn get_self_overlapping_contour() -> Polygon {
     let mut polygon = Polygon::new();
