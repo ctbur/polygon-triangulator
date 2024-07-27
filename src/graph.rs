@@ -2,15 +2,17 @@ use std::collections::HashMap;
 
 use crate::{
     intersections::{SegmentId, SegmentIntersection},
-    polygon::Polygon,
+    polygon::{Countour, Polygon},
     vector2::Vector2f,
 };
 
+#[derive(Debug, Clone)]
 pub struct Node {
     pub position: Vector2f,
     pub edges: Vec<usize>,
 }
 
+#[derive(Debug, Clone)]
 pub struct Graph {
     nodes: Vec<Node>,
     position_lookup: HashMap<(i64, i64), usize>,
@@ -67,6 +69,10 @@ impl Graph {
 
     pub fn nodes(&self) -> &Vec<Node> {
         &self.nodes
+    }
+
+    pub fn into_nodes(self) -> Vec<Node> {
+        self.nodes
     }
 }
 
@@ -168,4 +174,95 @@ pub fn build_graph(
     }
 
     return graph;
+}
+
+/// Traces the regions (faces) of the planar graph. The first region is the outline.
+fn trace_regions(graph: Graph) -> Vec<Countour> {
+    let mut nodes = graph.into_nodes();
+
+    // sort edges in CCW order
+    let nodes_ptr = nodes.as_ptr();
+    for node in &mut nodes {
+        node.edges.sort_by(|n1, n2| {
+            let n1: &Node = unsafe { &*(nodes_ptr.add(*n1)) };
+            let n2: &Node = unsafe { &*(nodes_ptr.add(*n2)) };
+
+            let a1 = (n1.position - node.position).angle();
+            let a2 = (n2.position - node.position).angle();
+
+            return f32::total_cmp(&a1, &a2);
+        });
+    }
+
+    let mut nodes_map = HashMap::new();
+    for (node_idx, node) in nodes.into_iter().enumerate() {
+        nodes_map.insert(node_idx, node);
+    }
+
+    let mut regions = Vec::new();
+    loop {
+        // angle 0 points in +X, with edges going CCW
+        // -> find point with lowest y value to start tracing with outline region
+        let mut node_idx_lowest_y = None;
+        for (node_idx, node) in &nodes_map {
+            match node_idx_lowest_y {
+                None => node_idx_lowest_y = Some(*node_idx),
+                Some(idx) => {
+                    if node.position.y < nodes_map.get(&idx).unwrap().position.y {
+                        node_idx_lowest_y = Some(idx);
+                    }
+                }
+            }
+        }
+
+        if node_idx_lowest_y.is_none() {
+            // no nodes are left
+            break;
+        }
+
+        let mut region = Countour::new();
+        let start_node_idx = node_idx_lowest_y.unwrap();
+        let mut current_node_idx = start_node_idx;
+        let mut outgoing_edge = 0;
+        loop {
+            // add point to contour
+            let current_node = nodes_map.get_mut(&current_node_idx).unwrap();
+            region.push(current_node.position);
+
+            // remove the edge, and the node if there are no edges left
+            current_node.edges.remove(outgoing_edge);
+            if current_node.edges.is_empty() {
+                nodes_map.remove(&current_node_idx);
+            }
+
+            // traverse the edge
+            let previous_node_idx = current_node_idx;
+            current_node_idx = outgoing_edge;
+
+            // if we reached original node, we are done
+            if current_node_idx == start_node_idx {
+                break;
+            }
+
+            // find incoming edge on connecting node
+            let next_node = nodes_map.get(&outgoing_edge).unwrap();
+            let mut incoming_edge_idx_opt = None;
+            for (edge_idx, edge) in next_node.edges.iter().enumerate() {
+                // if the edge points to the current node, that's where we come from
+                if *edge == previous_node_idx {
+                    incoming_edge_idx_opt = Some(edge_idx);
+                    break;
+                }
+            }
+            let incoming_edge_idx = incoming_edge_idx_opt.unwrap();
+
+            // new outgoing edge is next to incomine one, rotating CCW
+            let current_node = nodes_map.get(&current_node_idx).unwrap();
+            outgoing_edge = current_node.edges[(incoming_edge_idx + 1) % current_node.edges.len()];
+        }
+
+        regions.push(region);
+    }
+
+    return regions;
 }

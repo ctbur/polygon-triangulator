@@ -21,6 +21,10 @@ impl Vector2f {
         (self.x * self.x + self.y * self.y).sqrt()
     }
 
+    pub fn angle(&self) -> f32 {
+        self.y.atan2(self.x)
+    }
+
     pub fn length_squared(&self) -> f32 {
         self.x * self.x + self.y * self.y
     }

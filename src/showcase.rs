@@ -182,29 +182,35 @@ fn draw_graph<'a, T>(d: &mut RaylibMode2D<'a, T>, graph: &Graph) {
     let mut node_stack = Vec::new();
 
     let nodes = graph.nodes();
-    node_stack.push(0);
-    let mut i = 0;
-    while let Some(node_idx) = node_stack.pop() {
-        let node = &nodes[node_idx];
-
-        for other_node_idx in &node.edges {
-            if visited_nodes.contains(other_node_idx) {
-                continue;
-            }
-
-            let other_node = &nodes[*other_node_idx];
-            d.draw_line_ex(
-                node.position,
-                other_node.position,
-                4.0,
-                COLOR_SEQUENCE[i % COLOR_SEQUENCE.len()],
-            );
-            i += 1;
-
-            node_stack.push(*other_node_idx);
+    let mut color_counter = 0;
+    for i in 0..nodes.len() {
+        if visited_nodes.contains(&i) {
+            continue;
         }
 
-        visited_nodes.insert(node_idx);
+        node_stack.push(i);
+        while let Some(node_idx) = node_stack.pop() {
+            let node = &nodes[node_idx];
+
+            for other_node_idx in &node.edges {
+                if visited_nodes.contains(other_node_idx) {
+                    continue;
+                }
+
+                let other_node = &nodes[*other_node_idx];
+                d.draw_line_ex(
+                    node.position,
+                    other_node.position,
+                    4.0,
+                    COLOR_SEQUENCE[color_counter % COLOR_SEQUENCE.len()],
+                );
+                color_counter += 1;
+
+                node_stack.push(*other_node_idx);
+            }
+
+            visited_nodes.insert(node_idx);
+        }
     }
 }
 
@@ -340,6 +346,27 @@ pub fn get_star() -> Polygon {
     }
 
     polygon
+}
+
+pub fn get_overlapping_rects() -> Polygon {
+    let mut polygon = Polygon::new();
+
+    polygon.move_to(50.0, 50.0);
+    polygon.line_to(800.0, 50.0);
+    polygon.line_to(800.0, 800.0);
+    polygon.line_to(50.0, 800.0);
+
+    polygon.move_to(150.0, 150.0);
+    polygon.line_to(150.0, 450.0);
+    polygon.line_to(450.0, 450.0);
+    polygon.line_to(450.0, 150.0);
+
+    polygon.move_to(400.0, 400.0);
+    polygon.line_to(400.0, 700.0);
+    polygon.line_to(700.0, 700.0);
+    polygon.line_to(700.0, 400.0);
+
+    return polygon;
 }
 
 pub fn get_grid() -> Polygon {

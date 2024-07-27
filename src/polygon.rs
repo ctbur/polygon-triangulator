@@ -1,7 +1,9 @@
 use crate::vector2::Vector2f;
 
+pub type Countour = Vec<Vector2f>;
+
 pub struct Polygon {
-    contours: Vec<Vec<Vector2f>>,
+    contours: Vec<Countour>,
 }
 
 impl Polygon {
@@ -50,7 +52,7 @@ impl Polygon {
         }
     }
 
-    pub fn contours(&self) -> &Vec<Vec<Vector2f>> {
+    pub fn contours(&self) -> &Vec<Countour> {
         &self.contours
     }
 }

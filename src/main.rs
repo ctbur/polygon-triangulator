@@ -17,6 +17,7 @@ fn main() {
         showcase::get_arbitrary_polygon(),
         showcase::get_star(),
         showcase::get_rounded_rect(),
+        showcase::get_overlapping_rects(),
         showcase::get_grid(),
     ];
     let mut showcase = showcase::Showcase::build(rl, thread, polygons);
