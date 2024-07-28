@@ -1,9 +1,9 @@
 use crate::vector2::Vector2f;
 
-pub type Countour = Vec<Vector2f>;
+pub type Contour = Vec<Vector2f>;
 
 pub struct Polygon {
-    contours: Vec<Countour>,
+    contours: Vec<Contour>,
 }
 
 impl Polygon {
@@ -52,29 +52,12 @@ impl Polygon {
         }
     }
 
-    pub fn contours(&self) -> &Vec<Countour> {
+    pub fn contours(&self) -> &Vec<Contour> {
         &self.contours
     }
 }
 
-struct DiscretePolygon {
-    contours: Vec<Vec<(i64, i64)>>,
-}
-
-fn discretize(polygon: &Polygon, scale_factor: f32) -> DiscretePolygon {
-    let mut contours = Vec::new();
-
-    for contour in &polygon.contours {
-        let mut discrete_contour = Vec::new();
-
-        for p in contour {
-            let xd = (p.x * scale_factor) as i64;
-            let yd = (p.y * scale_factor) as i64;
-            discrete_contour.push((xd, yd));
-        }
-
-        contours.push(discrete_contour);
-    }
-
-    DiscretePolygon { contours }
+enum Orientation {
+    Clockwise,
+    CounterClockwise,
 }

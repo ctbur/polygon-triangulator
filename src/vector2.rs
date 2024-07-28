@@ -5,6 +5,8 @@ pub struct Vector2f {
 }
 
 impl Vector2f {
+    pub const ZERO: Vector2f = Vector2f { x: 0.0, y: 0.0 };
+
     pub fn new(x: f32, y: f32) -> Vector2f {
         Vector2f { x, y }
     }

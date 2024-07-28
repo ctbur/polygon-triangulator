@@ -1,14 +1,20 @@
 use std::collections::{HashMap, HashSet};
 
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use raylib::prelude::*;
 
 use crate::graph::{self, Graph};
 use crate::intersections::{self, SegmentId, SegmentIntersection};
-use crate::{vector2::Vector2f, Polygon};
+use crate::polygon::{Contour, Polygon};
+use crate::regions;
+use crate::vector2::Vector2f;
 
+#[derive(PartialEq, Eq)]
 enum DrawingMode {
     Contours,
     Graph,
+    Region,
 }
 
 const COLOR_SEQUENCE: [Color; 6] = [
@@ -26,6 +32,7 @@ pub struct Showcase {
     polygons: Vec<Polygon>,
     intersections: Vec<HashMap<SegmentId, Vec<SegmentIntersection>>>,
     graphs: Vec<Graph>,
+    regions: Vec<Vec<Contour>>,
     selected_polygon: usize,
     drawing_mode: DrawingMode,
     camera: Camera2D,
@@ -49,6 +56,13 @@ impl Showcase {
             graphs.push(graph::build_graph(&polygon, &intersections, 0.01));
         }
 
+        // find regions for all polygons
+        let mut regions = Vec::new();
+        for graph in &graphs {
+            let reg = regions::trace_regions(graph.clone());
+            regions.push(reg);
+        }
+
         let camera = Camera2D {
             offset: Vector2::new(0.0, 0.0),
             target: Vector2::new(0.0, 0.0),
@@ -61,6 +75,7 @@ impl Showcase {
             polygons,
             intersections,
             graphs,
+            regions,
             selected_polygon: 0,
             drawing_mode: DrawingMode::Contours,
             camera,
@@ -117,6 +132,8 @@ impl Showcase {
             self.drawing_mode = DrawingMode::Contours;
         } else if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_G) {
             self.drawing_mode = DrawingMode::Graph;
+        } else if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_R) {
+            self.drawing_mode = DrawingMode::Region;
         }
 
         // move camera with arrow keys
@@ -155,25 +172,44 @@ impl Showcase {
         let mut c = d.begin_mode2D(self.camera);
 
         match self.drawing_mode {
-            DrawingMode::Contours => draw_polygon(&mut c, &self.polygons[self.selected_polygon]),
+            DrawingMode::Contours => draw_contours(&mut c, &self.polygons[self.selected_polygon]),
             DrawingMode::Graph => draw_graph(&mut c, &self.graphs[self.selected_polygon]),
+            DrawingMode::Region => draw_regions(&mut c, &self.regions[self.selected_polygon]),
         }
 
-        draw_intersections(
-            &mut c,
-            &self.intersections[self.selected_polygon],
-            Vector2f::new(0.0, 0.0),
+        if self.drawing_mode != DrawingMode::Region {
+            draw_intersections(
+                &mut c,
+                &self.intersections[self.selected_polygon],
+                Vector2f::new(0.0, 0.0),
+            );
+        }
+    }
+}
+
+fn draw_contours<'a, T>(d: &mut RaylibMode2D<'a, T>, polygon: &Polygon) {
+    for (i, contour) in polygon.contours().iter().enumerate() {
+        draw_contour(
+            d,
+            contour,
+            Vector2f::ZERO,
+            4.0,
+            COLOR_SEQUENCE[i % COLOR_SEQUENCE.len()],
         );
     }
 }
 
-fn draw_polygon<'a, T>(d: &mut RaylibMode2D<'a, T>, polygon: &Polygon) {
-    for (i, contour) in polygon.contours().iter().enumerate() {
-        for j in 0..contour.len() {
-            let start = contour[j];
-            let end = contour[(j + 1) % contour.len()];
-            d.draw_line_ex(start, end, 4.0, COLOR_SEQUENCE[i % COLOR_SEQUENCE.len()]);
-        }
+fn draw_contour<'a, T>(
+    d: &mut RaylibMode2D<'a, T>,
+    contour: &Contour,
+    offset: Vector2f,
+    thickness: f32,
+    color: Color,
+) {
+    for j in 0..contour.len() {
+        let start = contour[j] + offset;
+        let end = contour[(j + 1) % contour.len()] + offset;
+        d.draw_line_ex(start, end, thickness, color);
     }
 }
 
@@ -211,6 +247,16 @@ fn draw_graph<'a, T>(d: &mut RaylibMode2D<'a, T>, graph: &Graph) {
 
             visited_nodes.insert(node_idx);
         }
+    }
+}
+
+fn draw_regions<'a, T>(d: &mut RaylibMode2D<'a, T>, regions: &Vec<Contour>) {
+    let mut rng = StdRng::seed_from_u64(1234567890);
+    for (i, region) in regions.iter().enumerate() {
+        let color = COLOR_SEQUENCE[i % COLOR_SEQUENCE.len()].alpha(0.5);
+
+        let offset = Vector2f::new(rng.gen_range(-10.0..10.0), rng.gen_range(-10.0..10.0));
+        draw_contour(d, region, offset, 4.0, color);
     }
 }
 

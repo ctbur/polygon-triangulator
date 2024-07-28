@@ -1,10 +1,9 @@
 mod graph;
 mod intersections;
 mod polygon;
+mod regions;
 mod showcase;
 mod vector2;
-
-use polygon::Polygon;
 
 fn main() {
     let (rl, thread) = raylib::init()
