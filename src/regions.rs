@@ -106,18 +106,13 @@ pub fn trace_regions(graph: Graph) -> Vec<Contour> {
 
             // mark the edge as traced
             if current_node.traced_edges[current_outgoing_edge_idx] {
-                //panic!("Edge traced twice");
+                panic!("Edge traced twice");
             }
             current_node.traced_edges[current_outgoing_edge_idx] = true;
 
             // traverse the edge
             let previous_node_idx = current_node_idx;
             current_node_idx = current_node.edges[current_outgoing_edge_idx];
-
-            // if we reached original node, we are done
-            if current_node_idx == start_node_idx {
-                break;
-            }
 
             // find incoming edge on connecting node
             let current_node = &nodes[current_node_idx];
@@ -129,6 +124,13 @@ pub fn trace_regions(graph: Graph) -> Vec<Contour> {
             // new outgoing edge is next to incomine one, rotating CCW, i.e.,
             // we need to take the next edge in order of edge index
             current_outgoing_edge_idx = current_node.next_edge_ccw(incoming_edge_idx);
+
+            // if we reached original node and edge, we are done
+            if current_node_idx == start_node_idx
+                && current_outgoing_edge_idx == start_outgoing_edge_idx
+            {
+                break;
+            }
         }
 
         regions.push(region);
