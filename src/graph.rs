@@ -36,10 +36,10 @@ impl Graph {
         let start_index = self.get_or_insert_node(start);
         let end_index = self.get_or_insert_node(end);
 
-        if !self.nodes[start_index].edges.contains(&start_index) {
+        if !self.nodes[start_index].edges.contains(&end_index) {
             self.nodes[start_index].edges.push(end_index);
         }
-        if !self.nodes[end_index].edges.contains(&end_index) {
+        if !self.nodes[end_index].edges.contains(&start_index) {
             self.nodes[end_index].edges.push(start_index);
         }
     }
