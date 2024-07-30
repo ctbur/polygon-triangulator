@@ -6,10 +6,11 @@ mod showcase;
 mod vector2;
 
 fn main() {
-    let (rl, thread) = raylib::init()
+    let (mut rl, thread) = raylib::init()
         .size(2500, 1500)
         .title("Hello, World")
         .build();
+    rl.set_target_fps(60);
 
     let polygons = vec![
         showcase::get_self_overlapping_contour(),
