@@ -1,4 +1,6 @@
+use ::core::f32;
 use std::collections::{HashMap, HashSet};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -214,6 +216,7 @@ fn draw_contour<'a, T>(
 }
 
 fn draw_graph<'a, T>(d: &mut RaylibMode2D<'a, T>, graph: &Graph) {
+    let mut rng = StdRng::seed_from_u64(1234567823);
     let mut visited_nodes = HashSet::new();
     let mut node_stack = Vec::new();
 
@@ -234,9 +237,20 @@ fn draw_graph<'a, T>(d: &mut RaylibMode2D<'a, T>, graph: &Graph) {
                 }
 
                 let other_node = &nodes[*other_node_idx];
+                let magnitude = rng.gen_range(0.0..25.0);
+                let angle = rng.gen_range(0.0..2.0 * f32::consts::PI)
+                    + ((SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis()
+                        % 2000) as f32)
+                        / 2000.0
+                        * 2.0
+                        * f32::consts::PI;
+                let offset = Vector2f::new(angle.sin(), angle.cos()) * magnitude;
                 d.draw_line_ex(
-                    node.position,
-                    other_node.position,
+                    node.position + offset,
+                    other_node.position + offset,
                     4.0,
                     COLOR_SEQUENCE[color_counter % COLOR_SEQUENCE.len()],
                 );
@@ -255,7 +269,17 @@ fn draw_regions<'a, T>(d: &mut RaylibMode2D<'a, T>, regions: &Vec<Contour>) {
     for (i, region) in regions.iter().enumerate() {
         let color = COLOR_SEQUENCE[i % COLOR_SEQUENCE.len()].alpha(0.5);
 
-        let offset = Vector2f::new(rng.gen_range(-10.0..10.0), rng.gen_range(-10.0..10.0));
+        let magnitude = rng.gen_range(0.0..25.0);
+        let angle = rng.gen_range(0.0..2.0 * f32::consts::PI)
+            + ((SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+                % 2000) as f32)
+                / 2000.0
+                * 2.0
+                * f32::consts::PI;
+        let offset = Vector2f::new(angle.sin(), angle.cos()) * magnitude;
         draw_contour(d, region, offset, 4.0, color);
     }
 }

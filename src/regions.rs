@@ -6,9 +6,32 @@ use crate::vector2::Vector2f;
 
 struct Node {
     position: Vector2f,
-    // edge_idx is the index of the edge in a list where the edges are ordered CCW
-    neighbor_to_edge_idx: HashMap<usize, usize>,
-    edges_by_idx: BTreeMap<usize, usize>,
+    // whether the edge was traced along
+    // note: this is per direction as the connected node will point back
+    traced_edges: Vec<bool>,
+    // edges are ordered CCW
+    edges: Vec<usize>,
+    // look up index of edge by edge value (=neighbor index)
+    edge_to_edge_idx: HashMap<usize, usize>,
+}
+
+impl Node {
+    fn first_untraced_index(&self) -> Option<usize> {
+        for (idx, traced) in self.traced_edges.iter().enumerate() {
+            if !traced {
+                return Some(idx);
+            }
+        }
+        return None;
+    }
+
+    fn next_edge_ccw(&self, current_idx: usize) -> usize {
+        if current_idx >= self.edges.len() {
+            panic!("Edge index out of bounds")
+        }
+
+        return (current_idx + self.edges.len() + 1) % self.edges.len();
+    }
 }
 
 /// Traces the regions (faces) of the planar graph. The first region is the outline.
@@ -29,24 +52,20 @@ pub fn trace_regions(graph: Graph) -> Vec<Contour> {
         });
     }
 
-    let mut nodes = HashMap::new();
+    let mut nodes = Vec::new();
     for (idx, node) in graph_nodes.into_iter().enumerate() {
-        let mut neighbor_to_edge_idx = HashMap::new();
-        let mut edges_by_idx = BTreeMap::new();
+        let mut edge_to_edge_idx = HashMap::new();
 
         for (edge_idx, neighbor) in node.edges.iter().enumerate() {
-            neighbor_to_edge_idx.insert(*neighbor, edge_idx);
-            edges_by_idx.insert(edge_idx, *neighbor);
+            edge_to_edge_idx.insert(*neighbor, edge_idx);
         }
 
-        nodes.insert(
-            idx,
-            Node {
-                position: node.position,
-                edges_by_idx,
-                neighbor_to_edge_idx,
-            },
-        );
+        nodes.push(Node {
+            position: node.position,
+            traced_edges: vec![false; node.edges.len()],
+            edges: node.edges,
+            edge_to_edge_idx,
+        });
     }
 
     let mut regions = Vec::new();
@@ -54,11 +73,15 @@ pub fn trace_regions(graph: Graph) -> Vec<Contour> {
         // angle 0 points in +X, with edges going CCW
         // -> find point with lowest y value to start tracing with outline region
         let mut node_idx_lowest_y = None;
-        for (node_idx, node) in &nodes {
+        for (node_idx, node) in nodes.iter().enumerate() {
+            if node.first_untraced_index().is_none() {
+                continue;
+            }
+
             match node_idx_lowest_y {
-                None => node_idx_lowest_y = Some(*node_idx),
+                None => node_idx_lowest_y = Some(node_idx),
                 Some(idx) => {
-                    if node.position.y < nodes.get(&idx).unwrap().position.y {
+                    if node.position.y < nodes[idx].position.y {
                         node_idx_lowest_y = Some(idx);
                     }
                 }
@@ -72,31 +95,24 @@ pub fn trace_regions(graph: Graph) -> Vec<Contour> {
 
         let mut region = Contour::new();
         let start_node_idx = node_idx_lowest_y.unwrap();
+        let start_outgoing_edge_idx = nodes[start_node_idx].first_untraced_index().unwrap();
+
         let mut current_node_idx = start_node_idx;
-        let mut outgoing_edge_idx = *nodes
-            .get_mut(&current_node_idx)
-            .unwrap()
-            .edges_by_idx
-            .first_entry()
-            .unwrap()
-            .key();
+        let mut current_outgoing_edge_idx = start_outgoing_edge_idx;
         loop {
             // add point to contour
-            let mut current_node = nodes.get_mut(&current_node_idx).unwrap();
+            let current_node = &mut nodes[current_node_idx];
             region.push(current_node.position);
 
-            // remove the edge, and the node if there are no edges left
-            let outgoing_edge = current_node
-                .edges_by_idx
-                .remove(&outgoing_edge_idx)
-                .unwrap();
-            if current_node.edges_by_idx.is_empty() {
-                nodes.remove(&current_node_idx);
+            // mark the edge as traced
+            if current_node.traced_edges[current_outgoing_edge_idx] {
+                //panic!("Edge traced twice");
             }
+            current_node.traced_edges[current_outgoing_edge_idx] = true;
 
             // traverse the edge
             let previous_node_idx = current_node_idx;
-            current_node_idx = outgoing_edge;
+            current_node_idx = current_node.edges[current_outgoing_edge_idx];
 
             // if we reached original node, we are done
             if current_node_idx == start_node_idx {
@@ -104,24 +120,15 @@ pub fn trace_regions(graph: Graph) -> Vec<Contour> {
             }
 
             // find incoming edge on connecting node
-            current_node = nodes.get_mut(&current_node_idx).unwrap();
-            let incoming_edge_idx = current_node
-                .neighbor_to_edge_idx
+            let current_node = &nodes[current_node_idx];
+            let incoming_edge_idx = *current_node
+                .edge_to_edge_idx
                 .get(&previous_node_idx)
                 .unwrap();
 
             // new outgoing edge is next to incomine one, rotating CCW, i.e.,
             // we need to take the next edge in order of edge index
-            let outgoing_edge_idx_opt = current_node
-                .edges_by_idx
-                .range(incoming_edge_idx + 1..)
-                .next();
-            outgoing_edge_idx = match outgoing_edge_idx_opt {
-                // there is an edge with larger index than the incoming one
-                Some((idx, _)) => *idx,
-                // we need to wrap around
-                None => *current_node.edges_by_idx.first_entry().unwrap().key(),
-            };
+            current_outgoing_edge_idx = current_node.next_edge_ccw(incoming_edge_idx);
         }
 
         regions.push(region);
