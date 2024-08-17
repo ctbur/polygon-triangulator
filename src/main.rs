@@ -1,9 +1,9 @@
 mod graph;
 mod intersections;
+mod partition;
 mod polygon;
 mod regions;
 mod showcase;
-mod triangulation;
 mod vector2;
 
 fn main() {

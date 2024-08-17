@@ -1,10 +1,9 @@
 use core::f32;
 use std::cmp::Ordering;
 
+use crate::graph::Graph;
 use crate::polygon::Contour;
 use crate::vector2::Vector2f;
-
-pub type Triangle = [Vector2f; 3];
 
 fn comp_points_x_dir(a: Vector2f, b: Vector2f) -> Ordering {
     return f32::total_cmp(&a.x, &b.x).then_with(|| f32::total_cmp(&a.y, &b.y));
@@ -55,24 +54,50 @@ impl<'a> SweepLineState<'a> {
         self.edges.push(upper);
     }
 
-    fn delete_edge_pair(&mut self, to_point_idx: usize) -> (Edge, Edge) {
-        let mut upper_idx = None;
+    fn delete_edge_pair(
+        &mut self,
+        to_point_idx: usize,
+        is_merge_point: bool,
+        ccw: bool,
+    ) -> (Edge, Edge) {
+        println!("Delete edge pair to {}", to_point_idx);
+
+        let mut first_idx = None;
         for (idx, edge) in self.edges.iter().enumerate() {
             if edge.to == to_point_idx {
-                upper_idx = Some(idx);
+                first_idx = Some(idx);
             }
         }
-        let upper = self.edges.remove(upper_idx.unwrap());
+        let first = self.edges.remove(first_idx.unwrap());
 
-        let mut lower_idx = None;
+        let mut second_idx = None;
         for (idx, edge) in self.edges.iter().enumerate() {
             if edge.to == to_point_idx {
-                lower_idx = Some(idx);
+                second_idx = Some(idx);
             }
         }
-        let lower = self.edges.remove(lower_idx.unwrap());
+        let second = self.edges.remove(second_idx.unwrap());
 
-        return (upper, lower);
+        let (predecessor, successor) = if first.from == (to_point_idx + 1) % self.region.len() {
+            (second, first)
+        } else {
+            (first, second)
+        };
+
+        // ccw: merge -> successor is lower
+        // ccw: end -> predecessor is upper
+        let tmp = if ccw && is_merge_point {
+            (successor, predecessor)
+        } else {
+            (predecessor, successor)
+        };
+
+        println!(
+            "Lower: ({}->{}), Upper. ({}->{})",
+            tmp.0.from, tmp.0.to, tmp.1.from, tmp.1.to
+        );
+
+        return tmp;
     }
 
     fn replace_edge(&mut self, to_point_idx: usize, new_edge: Edge) -> Edge {
@@ -90,7 +115,6 @@ impl<'a> SweepLineState<'a> {
     }
 
     fn find_edge_above(&mut self, point_idx: usize) -> &mut Edge {
-        println!("Find edge above {}", point_idx);
         // find edge immediately above point_idx
         let mut immediate_upper_edge = None;
         let mut lowest_y_dist = f32::INFINITY;
@@ -99,30 +123,27 @@ impl<'a> SweepLineState<'a> {
             panic!();
         }
 
-        for (idx, edge) in self.edges.iter_mut().enumerate() {
-            println!("idx: {} ({}->{})", idx, edge.from, edge.to);
-            // skip the lower edges
-            if idx % 2 == 0 {
-                continue;
-            }
-
+        for edge in self.edges.iter_mut() {
             // find distance from point to the end
             let edge_from = self.region[edge.from];
             let edge_to = self.region[edge.to];
             let point = self.region[point_idx];
-            println!("{}, {}->{}", point, edge_from, edge_to);
 
             // TODO: do we need to handle the case where the edge is vertical?
             let v = edge_to - edge_from;
             let y_dist = edge_from.y + v.y * (point.x - edge_from.x) / v.x - point.y;
 
-            println!("{} > 0.0 && {} < {}", y_dist, y_dist, lowest_y_dist);
             if y_dist > 0.0 && y_dist < lowest_y_dist {
                 lowest_y_dist = y_dist;
                 immediate_upper_edge = Some(edge);
             }
         }
-
+        println!(
+            "Find edge above {}: ({}->{})",
+            point_idx,
+            immediate_upper_edge.as_ref().unwrap().from,
+            immediate_upper_edge.as_ref().unwrap().to
+        );
         return immediate_upper_edge.unwrap();
     }
 }
@@ -143,11 +164,11 @@ fn next_point_idx(region: &Contour, point_idx: usize, ccw: bool) -> usize {
     };
 }
 
-/// Triangulates a region, i.e., a simple polygon (concave, no intersections)
+/// Partitions a region, i.e., a simple polygon (concave, no intersections)
 /// Uses the plane-sweep algorithm described in https://www.cs.umd.edu/class/fall2021/cmsc754/Lects/lect05-triangulate.pdf
-pub fn triangulate_region(region: &Contour) -> Vec<Triangle> {
+pub fn partition_region(graph: &mut Graph, region: &Contour) {
     if region.len() < 3 {
-        return Vec::new();
+        return;
     }
 
     // check if the region is running CCW
@@ -167,10 +188,8 @@ pub fn triangulate_region(region: &Contour) -> Vec<Triangle> {
         region,
         edges: Vec::new(),
     };
-    let mut i = 0;
-    for point_idx in points_order {
-        i += 1;
 
+    for &point_idx in &points_order {
         let prev_idx = prev_point_idx(region, point_idx, ccw);
         let next_idx = next_point_idx(region, point_idx, ccw);
         println!(
@@ -187,10 +206,9 @@ pub fn triangulate_region(region: &Contour) -> Vec<Triangle> {
         );
 
         println!(
-            "Looking at point {}, type {:?}, iteration {}",
+            "Looking at point {}, type {:?}",
             point_idx,
             categorize_point(prev, point, next),
-            i,
         );
 
         match categorize_point(prev, point, next) {
@@ -211,14 +229,18 @@ pub fn triangulate_region(region: &Contour) -> Vec<Triangle> {
             PointType::End => {
                 // delete upper ending at point_idx sweep line state
                 // delete lower ending at point_idx from sweep line state
-                let (upper, _) = sweep_line.delete_edge_pair(point_idx);
-                fix_up(region, ccw, point_idx, &upper);
+                let (_, upper) = sweep_line.delete_edge_pair(point_idx, false, ccw);
+                fix_up(graph, region, ccw, point_idx, &upper);
             }
             PointType::Split => {
                 // top_edge = find edge immediately above v
                 // diagonal connect point_idx to top_edge.helper
                 let top_edge = sweep_line.find_edge_above(point_idx);
-                split_polygon_across(point_idx, top_edge.helper);
+                println!(
+                    "Splitting polygon with edge from {} to {}",
+                    point_idx, top_edge.helper
+                );
+                graph.insert_segment(region[point_idx], region[top_edge.helper]);
 
                 // insert both edges
                 let upper = Edge {
@@ -235,28 +257,32 @@ pub fn triangulate_region(region: &Contour) -> Vec<Triangle> {
             }
             PointType::Merge => {
                 // _, lower = delete edges ending at point_idx
-                let (_, lower) = sweep_line.delete_edge_pair(point_idx);
+                let (lower, _) = sweep_line.delete_edge_pair(point_idx, true, ccw);
 
                 // top_edge = find edge immediately above v
                 let top_edge = sweep_line.find_edge_above(point_idx);
 
-                fix_up(region, ccw, point_idx, top_edge);
-                fix_up(region, ccw, point_idx, &lower);
+                fix_up(graph, region, ccw, point_idx, top_edge);
+                fix_up(graph, region, ccw, point_idx, &lower);
                 // top_edge.helper = point_idx - persist in state
+                println!(
+                    "Set edge ({}->{}) helper to {}",
+                    top_edge.from, top_edge.to, point_idx
+                );
                 top_edge.helper = point_idx;
             }
             PointType::UpperChain => {
-                // edge = replace edge ending at point_idx with Edge point_idx -> prev_idx, helper: point_idx
                 let edge = Edge {
                     from: point_idx,
                     to: prev_idx,
                     helper: point_idx,
                 };
-                fix_up(region, ccw, point_idx, &edge);
-                sweep_line.replace_edge(point_idx, edge);
+                let prev_edge = sweep_line.replace_edge(point_idx, edge);
+                fix_up(graph, region, ccw, point_idx, &prev_edge);
             }
             PointType::LowerChain => {
-                // edge = replace edge ending at point_idx with Edge point_idx -> next_idx, helper: point_idx
+                let top_edge = sweep_line.find_edge_above(point_idx);
+                fix_up(graph, region, ccw, point_idx, &top_edge);
                 let edge = Edge {
                     from: point_idx,
                     to: next_idx,
@@ -266,21 +292,23 @@ pub fn triangulate_region(region: &Contour) -> Vec<Triangle> {
             }
         }
     }
-
-    return Vec::new();
 }
 
-fn fix_up(region: &Contour, ccw: bool, point_idx: usize, edge: &Edge) {
+fn fix_up(graph: &mut Graph, region: &Contour, ccw: bool, point_idx: usize, edge: &Edge) {
     let prev = region[prev_point_idx(region, edge.helper, ccw)];
     let next = region[next_point_idx(region, edge.helper, ccw)];
 
+    println!(
+        "Fix up: P={}, E=({}->{}), H={}",
+        point_idx, edge.from, edge.to, edge.helper
+    );
     if categorize_point(prev, region[edge.helper], next) == PointType::Merge {
-        split_polygon_across(edge.helper, point_idx);
+        println!(
+            "Splitting polygon with edge from {} to {}",
+            edge.helper, point_idx
+        );
+        graph.insert_segment(region[edge.helper], region[point_idx]);
     }
-}
-
-fn split_polygon_across(a: usize, b: usize) {
-    println!("Splitting polygon with edge from {} to {}", a, b);
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -326,6 +354,8 @@ fn is_point_concave(prev: Vector2f, point: Vector2f, next: Vector2f) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::{regions, showcase};
+
     use super::*;
 
     #[test]
@@ -361,6 +391,103 @@ mod tests {
         assert_eq!(categorize_point(left, bottom, right), PointType::LowerChain);
     }
 
+    /*fn validate_triangulation(region: &Contour, triangulation: &Vec<Triangle>) {
+        let mut edge_count = HashMap::new();
+        fn insert_edge(edge_count: &mut HashMap<[usize; 2], usize>, from: usize, to: usize) {
+            let mut edge = [from, to];
+            edge.sort();
+
+            let mut entry = edge_count.entry(edge).or_default();
+            *entry += 1;
+        }
+
+        for triangle in triangulation {
+            insert_edge(&mut edge_count, triangle[0], triangle[1]);
+            insert_edge(&mut edge_count, triangle[1], triangle[2]);
+            insert_edge(&mut edge_count, triangle[2], triangle[0]);
+        }
+
+        for i in 0..region.len() {
+            let edge = [i, (i + 1) % region.len()];
+            assert_eq!(
+                edge_count[&edge], 1,
+                "Contour edge appears {} times instead of once",
+                edge_count[&edge]
+            );
+            edge_count.remove(&edge);
+        }
+
+        for (_, count) in &edge_count {
+            assert_eq!(
+                *count, 2,
+                "Internal edge appears {} times instead of twice",
+                count
+            );
+        }
+    }*/
+
+    fn get_graph(region: &Contour) -> Graph {
+        let mut graph = Graph::new(0.01);
+        for i in 0..region.len() {
+            graph.insert_segment(region[i], region[(i + 1) % region.len()]);
+        }
+        return graph;
+    }
+
+    fn validate_partitioning(graph: &Graph) {
+        let monotone_polygons = regions::trace_regions(graph.clone());
+
+        // check if polygons really are x-monotone
+        for (i, contour) in monotone_polygons.iter().enumerate() {
+            println!("{}: ", i);
+            for c in contour {
+                print!("({},{}),", c.x, c.y);
+            }
+            println!();
+        }
+        for contour in monotone_polygons.iter().skip(1) {
+            let mut start_opt = None;
+            for i in 0..contour.len() {
+                let prev = contour[(i + contour.len() - 1) % contour.len()];
+                let point = contour[i];
+                let next = contour[(i + 1) % contour.len()];
+
+                if point.x <= prev.x && point.x <= next.x {
+                    start_opt = Some(i);
+                    break;
+                }
+            }
+
+            let start = start_opt.unwrap();
+
+            // find first chain end
+            let mut current = start;
+            while contour[current].x <= contour[(current + 1) % contour.len()].x {
+                current = (current + 1) % contour.len();
+
+                if current == start {
+                    panic!("All points have same x coordinate");
+                }
+            }
+
+            let end = current;
+            current = start;
+            while current != end {
+                let next = (current + contour.len() - 1) % contour.len();
+
+                if contour[current].x > contour[next].x {
+                    for c in contour {
+                        print!("({},{}),", c.x, c.y);
+                    }
+                    println!();
+                    panic!("Polygon is not monotone: {:?}", contour);
+                }
+
+                current = next;
+            }
+        }
+    }
+
     #[test]
     fn test_diamond() {
         let diamond = vec![
@@ -369,7 +496,9 @@ mod tests {
             Vector2f::new(1.0, 3.0),
             Vector2f::new(0.0, 2.0),
         ];
-        triangulate_region(&diamond);
+        let mut graph = get_graph(&diamond);
+        partition_region(&mut graph, &diamond);
+        validate_partitioning(&graph);
     }
 
     #[test]
@@ -380,7 +509,9 @@ mod tests {
             Vector2f::new(2.0, 2.0),
             Vector2f::new(2.0, 1.0),
         ];
-        triangulate_region(&rect);
+        let mut graph = get_graph(&rect);
+        partition_region(&mut graph, &rect);
+        validate_partitioning(&graph);
     }
 
     #[test]
@@ -391,7 +522,9 @@ mod tests {
             Vector2f::new(0.0, 10.0),
             Vector2f::new(20.0, 15.0),
         ];
-        triangulate_region(&arrow);
+        let mut graph = get_graph(&arrow);
+        partition_region(&mut graph, &arrow);
+        validate_partitioning(&graph);
     }
 
     #[test]
@@ -404,6 +537,31 @@ mod tests {
             Vector2f::new(0.0, 10.0),
             Vector2f::new(2.0, 5.0),
         ];
-        triangulate_region(&hourglass);
+        let mut graph = get_graph(&hourglass);
+        partition_region(&mut graph, &hourglass);
+        validate_partitioning(&graph);
+    }
+
+    #[test]
+    fn test_contour() {
+        let contour = vec![
+            Vector2f::new(400.0, 450.0),
+            Vector2f::new(400.0, 700.0),
+            Vector2f::new(700.0, 700.0),
+            Vector2f::new(700.0, 400.0),
+            Vector2f::new(450.0, 400.0),
+            Vector2f::new(450.0, 450.0),
+        ];
+        let mut graph = get_graph(&contour);
+        partition_region(&mut graph, &contour);
+        validate_partitioning(&graph);
+    }
+
+    #[test]
+    fn test_star() {
+        let contour = showcase::get_star().contours()[0].clone();
+        let mut graph = get_graph(&contour);
+        partition_region(&mut graph, &contour);
+        validate_partitioning(&graph);
     }
 }

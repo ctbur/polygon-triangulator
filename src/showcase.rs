@@ -10,13 +10,14 @@ use crate::graph::{self, Graph};
 use crate::intersections::{self, SegmentId, SegmentIntersection};
 use crate::polygon::{Contour, Polygon};
 use crate::vector2::Vector2f;
-use crate::{regions, triangulation};
+use crate::{partition, regions};
 
 #[derive(PartialEq, Eq)]
 enum DrawingMode {
     Contours,
-    Graph,
+    IntersectionGraph,
     Region,
+    PartitionGraph,
 }
 
 const COLOR_SEQUENCE: [Color; 6] = [
@@ -28,13 +29,18 @@ const COLOR_SEQUENCE: [Color; 6] = [
     Color::PINK,
 ];
 
+struct TriangulationStages {
+    polygon: Polygon,
+    intersections: HashMap<SegmentId, Vec<SegmentIntersection>>,
+    intersection_graph: Graph,
+    regions: Vec<Contour>,
+    partition_graph: Graph,
+}
+
 pub struct Showcase {
     raylib_handle: RaylibHandle,
     raylib_thread: RaylibThread,
-    polygons: Vec<Polygon>,
-    intersections: Vec<HashMap<SegmentId, Vec<SegmentIntersection>>>,
-    graphs: Vec<Graph>,
-    regions: Vec<Vec<Contour>>,
+    stages: Vec<TriangulationStages>,
     selected_polygon: usize,
     drawing_mode: DrawingMode,
     camera: Camera2D,
@@ -46,30 +52,32 @@ impl Showcase {
         raylib_thread: RaylibThread,
         polygons: Vec<Polygon>,
     ) -> Showcase {
-        // find intersections for all polygons
-        let mut intersections = Vec::new();
-        for polygon in &polygons {
-            intersections.push(intersections::find_intersections(polygon, 0.01));
-        }
+        let epsilon = 0.01;
+        let mut stages = Vec::new();
+        for polygon in polygons {
+            let intersections = intersections::find_intersections(&polygon, epsilon);
+            let intersection_graph = graph::build_graph(&polygon, &intersections, epsilon);
+            let regions = regions::trace_regions(intersection_graph.clone());
 
-        // build graphs for all polygons
-        let mut graphs = Vec::new();
-        for (polygon, intersections) in polygons.iter().zip(intersections.iter()) {
-            graphs.push(graph::build_graph(&polygon, &intersections, 0.01));
-        }
-
-        // find regions for all polygons
-        let mut regions = Vec::new();
-        for graph in &graphs {
-            let reg = regions::trace_regions(graph.clone());
-            regions.push(reg);
-        }
-
-        // triangulate regions for all polygons
-        for region_vec in &regions {
-            for region in region_vec {
-                triangulation::triangulate_region(&region);
+            let mut partition_graph = intersection_graph.clone();
+            let edge_count_pre = partition_graph.edge_count();
+            for region in regions.iter().skip(1) {
+                partition::partition_region(&mut partition_graph, region);
             }
+            println!(
+                "Edge count: pre: {}, post: {}",
+                edge_count_pre,
+                partition_graph.edge_count()
+            );
+
+            let stage = TriangulationStages {
+                polygon,
+                intersections,
+                intersection_graph,
+                regions,
+                partition_graph,
+            };
+            stages.push(stage);
         }
 
         let camera = Camera2D {
@@ -81,10 +89,7 @@ impl Showcase {
         Showcase {
             raylib_handle,
             raylib_thread,
-            polygons,
-            intersections,
-            graphs,
-            regions,
+            stages,
             selected_polygon: 0,
             drawing_mode: DrawingMode::Contours,
             camera,
@@ -104,7 +109,7 @@ impl Showcase {
     fn handle_input(&mut self) {
         // select next/previous polygon
         if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_PAGE_UP) {
-            self.selected_polygon = (self.selected_polygon + 1) % self.polygons.len();
+            self.selected_polygon = (self.selected_polygon + 1) % self.stages.len();
         }
 
         if self
@@ -112,11 +117,11 @@ impl Showcase {
             .is_key_pressed(KeyboardKey::KEY_PAGE_DOWN)
         {
             self.selected_polygon =
-                (self.selected_polygon + self.polygons.len() - 1) % self.polygons.len();
+                (self.selected_polygon + self.stages.len() - 1) % self.stages.len();
         }
 
         // select polygons with number keys
-        for i in 0..self.polygons.len() {
+        for i in 0..self.stages.len() {
             let key_by_number = match i {
                 0 => KeyboardKey::KEY_ONE,
                 1 => KeyboardKey::KEY_TWO,
@@ -139,10 +144,12 @@ impl Showcase {
         // select drawing mode
         if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_C) {
             self.drawing_mode = DrawingMode::Contours;
-        } else if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_G) {
-            self.drawing_mode = DrawingMode::Graph;
+        } else if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_I) {
+            self.drawing_mode = DrawingMode::IntersectionGraph;
         } else if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_R) {
             self.drawing_mode = DrawingMode::Region;
+        } else if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_P) {
+            self.drawing_mode = DrawingMode::PartitionGraph;
         }
 
         // move camera with arrow keys
@@ -181,15 +188,25 @@ impl Showcase {
         let mut c = d.begin_mode2D(self.camera);
 
         match self.drawing_mode {
-            DrawingMode::Contours => draw_contours(&mut c, &self.polygons[self.selected_polygon]),
-            DrawingMode::Graph => draw_graph(&mut c, &self.graphs[self.selected_polygon]),
-            DrawingMode::Region => draw_regions(&mut c, &self.regions[self.selected_polygon]),
+            DrawingMode::Contours => {
+                draw_contours(&mut c, &self.stages[self.selected_polygon].polygon)
+            }
+            DrawingMode::IntersectionGraph => draw_graph(
+                &mut c,
+                &self.stages[self.selected_polygon].intersection_graph,
+            ),
+            DrawingMode::Region => {
+                draw_regions(&mut c, &self.stages[self.selected_polygon].regions)
+            }
+            DrawingMode::PartitionGraph => {
+                draw_graph(&mut c, &self.stages[self.selected_polygon].partition_graph)
+            }
         }
 
         if self.drawing_mode != DrawingMode::Region {
             draw_intersections(
                 &mut c,
-                &self.intersections[self.selected_polygon],
+                &self.stages[self.selected_polygon].intersections,
                 Vector2f::new(0.0, 0.0),
             );
         }
@@ -244,7 +261,7 @@ fn draw_graph<'a, T>(d: &mut RaylibMode2D<'a, T>, graph: &Graph) {
                 }
 
                 let other_node = &nodes[*other_node_idx];
-                let magnitude = rng.gen_range(0.0..25.0);
+                let magnitude = rng.gen_range(0.0..10.0);
                 let angle = rng.gen_range(0.0..2.0 * f32::consts::PI)
                     + ((SystemTime::now()
                         .duration_since(UNIX_EPOCH)
@@ -276,7 +293,7 @@ fn draw_regions<'a, T>(d: &mut RaylibMode2D<'a, T>, regions: &Vec<Contour>) {
     for (i, region) in regions.iter().enumerate() {
         let color = COLOR_SEQUENCE[i % COLOR_SEQUENCE.len()].alpha(0.5);
 
-        let magnitude = rng.gen_range(0.0..25.0);
+        let magnitude = rng.gen_range(0.0..10.0);
         let angle = rng.gen_range(0.0..2.0 * f32::consts::PI)
             + ((SystemTime::now()
                 .duration_since(UNIX_EPOCH)
