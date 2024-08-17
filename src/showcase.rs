@@ -9,8 +9,8 @@ use raylib::prelude::*;
 use crate::graph::{self, Graph};
 use crate::intersections::{self, SegmentId, SegmentIntersection};
 use crate::polygon::{Contour, Polygon};
-use crate::regions;
 use crate::vector2::Vector2f;
+use crate::{regions, triangulation};
 
 #[derive(PartialEq, Eq)]
 enum DrawingMode {
@@ -63,6 +63,13 @@ impl Showcase {
         for graph in &graphs {
             let reg = regions::trace_regions(graph.clone());
             regions.push(reg);
+        }
+
+        // triangulate regions for all polygons
+        for region_vec in &regions {
+            for region in region_vec {
+                triangulation::triangulate_region(&region);
+            }
         }
 
         let camera = Camera2D {
