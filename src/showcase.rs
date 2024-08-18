@@ -9,15 +9,17 @@ use raylib::prelude::*;
 use crate::graph::{self, Graph};
 use crate::intersections::{self, SegmentId, SegmentIntersection};
 use crate::polygon::{Contour, Polygon};
+use crate::triangulation::{self, Triangle};
 use crate::vector2::Vector2f;
 use crate::{partition, regions};
 
 #[derive(PartialEq, Eq)]
 enum DrawingMode {
     Contours,
-    IntersectionGraph,
-    Region,
-    PartitionGraph,
+    Graph,
+    Regions,
+    MonotoneRegions,
+    Triangulation,
 }
 
 const COLOR_SEQUENCE: [Color; 6] = [
@@ -32,9 +34,10 @@ const COLOR_SEQUENCE: [Color; 6] = [
 struct TriangulationStages {
     polygon: Polygon,
     intersections: HashMap<SegmentId, Vec<SegmentIntersection>>,
-    intersection_graph: Graph,
+    graph: Graph,
     regions: Vec<Contour>,
-    partition_graph: Graph,
+    monotone_regions: Vec<Contour>,
+    triangulations: Vec<(Contour, Vec<Triangle>)>,
 }
 
 pub struct Showcase {
@@ -60,22 +63,25 @@ impl Showcase {
             let regions = regions::trace_regions(intersection_graph.clone());
 
             let mut partition_graph = intersection_graph.clone();
-            let edge_count_pre = partition_graph.edge_count();
             for region in regions.iter().skip(1) {
                 partition::partition_region(&mut partition_graph, region);
             }
-            println!(
-                "Edge count: pre: {}, post: {}",
-                edge_count_pre,
-                partition_graph.edge_count()
-            );
+            let monotone_regions = regions::trace_regions(partition_graph);
+
+            let mut triangulations = Vec::new();
+            for region in monotone_regions.iter().skip(1) {
+                let mut triangles = Vec::new();
+                triangulation::triangulate_monotone_region(&mut triangles, region);
+                triangulations.push((region.clone(), triangles));
+            }
 
             let stage = TriangulationStages {
                 polygon,
                 intersections,
-                intersection_graph,
+                graph: intersection_graph,
                 regions,
-                partition_graph,
+                monotone_regions,
+                triangulations,
             };
             stages.push(stage);
         }
@@ -144,12 +150,14 @@ impl Showcase {
         // select drawing mode
         if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_C) {
             self.drawing_mode = DrawingMode::Contours;
-        } else if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_I) {
-            self.drawing_mode = DrawingMode::IntersectionGraph;
+        } else if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_G) {
+            self.drawing_mode = DrawingMode::Graph;
         } else if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_R) {
-            self.drawing_mode = DrawingMode::Region;
-        } else if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_P) {
-            self.drawing_mode = DrawingMode::PartitionGraph;
+            self.drawing_mode = DrawingMode::Regions;
+        } else if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_M) {
+            self.drawing_mode = DrawingMode::MonotoneRegions;
+        } else if self.raylib_handle.is_key_pressed(KeyboardKey::KEY_T) {
+            self.drawing_mode = DrawingMode::Triangulation;
         }
 
         // move camera with arrow keys
@@ -191,19 +199,19 @@ impl Showcase {
             DrawingMode::Contours => {
                 draw_contours(&mut c, &self.stages[self.selected_polygon].polygon)
             }
-            DrawingMode::IntersectionGraph => draw_graph(
-                &mut c,
-                &self.stages[self.selected_polygon].intersection_graph,
-            ),
-            DrawingMode::Region => {
+            DrawingMode::Graph => draw_graph(&mut c, &self.stages[self.selected_polygon].graph),
+            DrawingMode::Regions => {
                 draw_regions(&mut c, &self.stages[self.selected_polygon].regions)
             }
-            DrawingMode::PartitionGraph => {
-                draw_graph(&mut c, &self.stages[self.selected_polygon].partition_graph)
+            DrawingMode::MonotoneRegions => {
+                draw_regions(&mut c, &self.stages[self.selected_polygon].monotone_regions)
+            }
+            DrawingMode::Triangulation => {
+                draw_triangulations(&mut c, &self.stages[self.selected_polygon].triangulations);
             }
         }
 
-        if self.drawing_mode != DrawingMode::Region {
+        if self.drawing_mode != DrawingMode::Regions {
             draw_intersections(
                 &mut c,
                 &self.stages[self.selected_polygon].intersections,
@@ -359,6 +367,26 @@ fn draw_intersections<'a, T>(
                 }
             }
         }
+    }
+}
+
+fn draw_triangulations<'a, T>(
+    d: &mut RaylibMode2D<'a, T>,
+    triangluations: &Vec<(Contour, Vec<Triangle>)>,
+) {
+    println!("draw");
+    let mut color_idx = 0;
+    for (c, triangles) in triangluations {
+        for t in triangles {
+            println!("{},{},{}", c[t[0]], c[t[1]], c[t[2]],);
+            d.draw_triangle(
+                c[t[0]],
+                c[t[1]],
+                c[t[2]],
+                COLOR_SEQUENCE[color_idx % COLOR_SEQUENCE.len()],
+            );
+        }
+        color_idx += 1;
     }
 }
 

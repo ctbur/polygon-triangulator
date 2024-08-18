@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Vector2f {
     pub x: f32,
     pub y: f32,

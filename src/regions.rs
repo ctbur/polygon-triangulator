@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use crate::graph::Graph;
 use crate::polygon::Contour;
@@ -35,6 +35,7 @@ impl Node {
 }
 
 /// Traces the regions (faces) of the planar graph. The first region is the outline.
+/// The outline always runs CCW, the interior regions run CW.
 pub fn trace_regions(graph: Graph) -> Vec<Contour> {
     let mut graph_nodes = graph.into_nodes();
 
@@ -53,7 +54,7 @@ pub fn trace_regions(graph: Graph) -> Vec<Contour> {
     }
 
     let mut nodes = Vec::new();
-    for (idx, node) in graph_nodes.into_iter().enumerate() {
+    for node in graph_nodes.into_iter() {
         let mut edge_to_edge_idx = HashMap::new();
 
         for (edge_idx, neighbor) in node.edges.iter().enumerate() {

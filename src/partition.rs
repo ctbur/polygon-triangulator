@@ -2,33 +2,11 @@ use core::f32;
 use std::cmp::Ordering;
 
 use crate::graph::Graph;
-use crate::polygon::Contour;
+use crate::polygon::{self, Contour};
 use crate::vector2::Vector2f;
 
 fn comp_points_x_dir(a: Vector2f, b: Vector2f) -> Ordering {
     return f32::total_cmp(&a.x, &b.x).then_with(|| f32::total_cmp(&a.y, &b.y));
-}
-
-/// Uses the shoelace formulate to calculate the signed polygon area.
-/// The sign is positive if the region runs CCW.
-fn calculate_region_area(region: &Contour) -> f32 {
-    if region.len() < 3 {
-        return 0.0;
-    }
-
-    let mut area = 0.0;
-
-    for i in 0..region.len() - 1 {
-        let p_i = region[i];
-        let p_ni = region[i + 1];
-        area += (p_i.y + p_ni.y) * (p_i.x - p_ni.x);
-    }
-
-    let p_i = region.last().unwrap();
-    let p_ni = region[0];
-    area += (p_i.y + p_ni.y) * (p_i.x - p_ni.x);
-
-    return area / 2.0;
 }
 
 struct Edge {
@@ -172,7 +150,7 @@ pub fn partition_region(graph: &mut Graph, region: &Contour) {
     }
 
     // check if the region is running CCW
-    let ccw = calculate_region_area(region) > 0.0;
+    let ccw = polygon::calculate_region_area(region) > 0.0;
 
     // contains indices of region which are going to be sorted
     let mut points_order = Vec::from_iter(0..region.len());
@@ -327,14 +305,14 @@ fn categorize_point(prev: Vector2f, point: Vector2f, next: Vector2f) -> PointTyp
 
     return match (prev_comp, next_comp) {
         (Ordering::Less, Ordering::Less) => {
-            if is_point_concave(prev, point, next) {
+            if is_point_reflex(prev, point, next) {
                 PointType::Split
             } else {
                 PointType::Start
             }
         }
         (Ordering::Greater, Ordering::Greater) => {
-            if is_point_concave(prev, point, next) {
+            if is_point_reflex(prev, point, next) {
                 PointType::Merge
             } else {
                 PointType::End
@@ -346,7 +324,7 @@ fn categorize_point(prev: Vector2f, point: Vector2f, next: Vector2f) -> PointTyp
     };
 }
 
-fn is_point_concave(prev: Vector2f, point: Vector2f, next: Vector2f) -> bool {
+fn is_point_reflex(prev: Vector2f, point: Vector2f, next: Vector2f) -> bool {
     // we assume that the region is running CCW
     // thus the interior angle is on the left side of the above point chain
     return (prev - point).cross(next - point) > 0.0;
@@ -357,24 +335,6 @@ mod tests {
     use crate::{regions, showcase};
 
     use super::*;
-
-    #[test]
-    fn test_calculate_region_area() {
-        let mut region = vec![
-            Vector2f::new(1.0, 1.0),
-            Vector2f::new(2.0, 2.0),
-            Vector2f::new(1.0, 3.0),
-            Vector2f::new(0.0, 2.0),
-        ];
-
-        let area = calculate_region_area(&region);
-        assert_eq!(area, 2.0);
-
-        region.reverse();
-
-        let rev_area = calculate_region_area(&region);
-        assert_eq!(rev_area, -2.0);
-    }
 
     #[test]
     fn test_categorize_point() {
@@ -391,41 +351,6 @@ mod tests {
         assert_eq!(categorize_point(left, bottom, right), PointType::LowerChain);
     }
 
-    /*fn validate_triangulation(region: &Contour, triangulation: &Vec<Triangle>) {
-        let mut edge_count = HashMap::new();
-        fn insert_edge(edge_count: &mut HashMap<[usize; 2], usize>, from: usize, to: usize) {
-            let mut edge = [from, to];
-            edge.sort();
-
-            let mut entry = edge_count.entry(edge).or_default();
-            *entry += 1;
-        }
-
-        for triangle in triangulation {
-            insert_edge(&mut edge_count, triangle[0], triangle[1]);
-            insert_edge(&mut edge_count, triangle[1], triangle[2]);
-            insert_edge(&mut edge_count, triangle[2], triangle[0]);
-        }
-
-        for i in 0..region.len() {
-            let edge = [i, (i + 1) % region.len()];
-            assert_eq!(
-                edge_count[&edge], 1,
-                "Contour edge appears {} times instead of once",
-                edge_count[&edge]
-            );
-            edge_count.remove(&edge);
-        }
-
-        for (_, count) in &edge_count {
-            assert_eq!(
-                *count, 2,
-                "Internal edge appears {} times instead of twice",
-                count
-            );
-        }
-    }*/
-
     fn get_graph(region: &Contour) -> Graph {
         let mut graph = Graph::new(0.01);
         for i in 0..region.len() {
@@ -434,62 +359,17 @@ mod tests {
         return graph;
     }
 
-    fn validate_partitioning(graph: &Graph) {
-        let monotone_polygons = regions::trace_regions(graph.clone());
+    fn validate_partitioning(graph: Graph) {
+        let monotone_polygons = regions::trace_regions(graph);
 
         // check if polygons really are x-monotone
-        for (i, contour) in monotone_polygons.iter().enumerate() {
-            println!("{}: ", i);
-            for c in contour {
-                print!("({},{}),", c.x, c.y);
-            }
-            println!();
-        }
-        for contour in monotone_polygons.iter().skip(1) {
-            let mut start_opt = None;
-            for i in 0..contour.len() {
-                let prev = contour[(i + contour.len() - 1) % contour.len()];
-                let point = contour[i];
-                let next = contour[(i + 1) % contour.len()];
-
-                if point.x <= prev.x && point.x <= next.x {
-                    start_opt = Some(i);
-                    break;
-                }
-            }
-
-            let start = start_opt.unwrap();
-
-            // find first chain end
-            let mut current = start;
-            while contour[current].x <= contour[(current + 1) % contour.len()].x {
-                current = (current + 1) % contour.len();
-
-                if current == start {
-                    panic!("All points have same x coordinate");
-                }
-            }
-
-            let end = current;
-            current = start;
-            while current != end {
-                let next = (current + contour.len() - 1) % contour.len();
-
-                if contour[current].x > contour[next].x {
-                    for c in contour {
-                        print!("({},{}),", c.x, c.y);
-                    }
-                    println!();
-                    panic!("Polygon is not monotone: {:?}", contour);
-                }
-
-                current = next;
-            }
+        for region in monotone_polygons.iter().skip(1) {
+            assert!(polygon::is_region_x_monotone(region))
         }
     }
 
     #[test]
-    fn test_diamond() {
+    fn test_partition_diamond() {
         let diamond = vec![
             Vector2f::new(1.0, 1.0),
             Vector2f::new(2.0, 2.0),
@@ -498,11 +378,11 @@ mod tests {
         ];
         let mut graph = get_graph(&diamond);
         partition_region(&mut graph, &diamond);
-        validate_partitioning(&graph);
+        validate_partitioning(graph);
     }
 
     #[test]
-    fn test_rect() {
+    fn test_partition_rect() {
         let rect = vec![
             Vector2f::new(1.0, 1.0),
             Vector2f::new(1.0, 2.0),
@@ -511,11 +391,11 @@ mod tests {
         ];
         let mut graph = get_graph(&rect);
         partition_region(&mut graph, &rect);
-        validate_partitioning(&graph);
+        validate_partitioning(graph);
     }
 
     #[test]
-    fn test_arrow() {
+    fn test_partition_arrow() {
         let arrow = vec![
             Vector2f::new(0.0, 20.0),
             Vector2f::new(5.0, 15.0),
@@ -524,11 +404,11 @@ mod tests {
         ];
         let mut graph = get_graph(&arrow);
         partition_region(&mut graph, &arrow);
-        validate_partitioning(&graph);
+        validate_partitioning(graph);
     }
 
     #[test]
-    fn test_hourglass() {
+    fn test_partition_hourglass() {
         let hourglass = vec![
             Vector2f::new(0.0, 0.0),
             Vector2f::new(10.0, 0.0),
@@ -539,11 +419,11 @@ mod tests {
         ];
         let mut graph = get_graph(&hourglass);
         partition_region(&mut graph, &hourglass);
-        validate_partitioning(&graph);
+        validate_partitioning(graph);
     }
 
     #[test]
-    fn test_contour() {
+    fn test_partition_contour() {
         let contour = vec![
             Vector2f::new(400.0, 450.0),
             Vector2f::new(400.0, 700.0),
@@ -554,14 +434,14 @@ mod tests {
         ];
         let mut graph = get_graph(&contour);
         partition_region(&mut graph, &contour);
-        validate_partitioning(&graph);
+        validate_partitioning(graph);
     }
 
     #[test]
-    fn test_star() {
-        let contour = showcase::get_star().contours()[0].clone();
-        let mut graph = get_graph(&contour);
-        partition_region(&mut graph, &contour);
-        validate_partitioning(&graph);
+    fn test_partition_star() {
+        let star = showcase::get_star().contours()[0].clone();
+        let mut graph = get_graph(&star);
+        partition_region(&mut graph, &star);
+        validate_partitioning(graph);
     }
 }

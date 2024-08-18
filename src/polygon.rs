@@ -57,7 +57,90 @@ impl Polygon {
     }
 }
 
-enum Orientation {
-    Clockwise,
-    CounterClockwise,
+/// Uses the shoelace formulate to calculate the signed polygon area.
+/// The sign is positive if the region runs CCW.
+pub fn calculate_region_area(region: &Contour) -> f32 {
+    if region.len() < 3 {
+        return 0.0;
+    }
+
+    let mut area = 0.0;
+
+    for i in 0..region.len() - 1 {
+        let p_i = region[i];
+        let p_ni = region[i + 1];
+        area += (p_i.y + p_ni.y) * (p_i.x - p_ni.x);
+    }
+
+    let p_i = region.last().unwrap();
+    let p_ni = region[0];
+    area += (p_i.y + p_ni.y) * (p_i.x - p_ni.x);
+
+    return area / 2.0;
+}
+
+pub fn is_region_x_monotone(region: &Contour) -> bool {
+    if region.len() <= 3 {
+        return true;
+    }
+
+    // find start point, i.e., leftmost point
+    let mut start_idx = 0;
+    let mut min_x = f32::INFINITY;
+    for (i, point) in region.iter().enumerate() {
+        if min_x > point.x {
+            min_x = point.x;
+            start_idx = i;
+        }
+    }
+
+    // find first chain end
+    let mut current = start_idx;
+    while region[current].x <= region[(current + 1) % region.len()].x {
+        current = (current + 1) % region.len();
+
+        if current == start_idx {
+            // all region points have the same x coordinate
+            return false;
+        }
+    }
+
+    // check if second chain reaches end
+    let end = current;
+    current = start_idx;
+    while current != end {
+        let next = (current + region.len() - 1) % region.len();
+
+        if region[current].x > region[next].x {
+            // x position in chain decreases before reaching `end`
+            return false;
+        }
+
+        current = next;
+    }
+
+    return true;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calculate_region_area() {
+        let mut region = vec![
+            Vector2f::new(1.0, 1.0),
+            Vector2f::new(2.0, 2.0),
+            Vector2f::new(1.0, 3.0),
+            Vector2f::new(0.0, 2.0),
+        ];
+
+        let area = calculate_region_area(&region);
+        assert_eq!(area, 2.0);
+
+        region.reverse();
+
+        let rev_area = calculate_region_area(&region);
+        assert_eq!(rev_area, -2.0);
+    }
 }

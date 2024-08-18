@@ -28,16 +28,6 @@ impl Graph {
         }
     }
 
-    pub fn edge_count(&self) -> usize {
-        let mut edge_count_2x = 0;
-
-        for node in &self.nodes {
-            edge_count_2x += node.edges.len();
-        }
-
-        return edge_count_2x / 2;
-    }
-
     pub fn insert_segment(&mut self, start: Vector2f, end: Vector2f) {
         if start == end {
             return;
