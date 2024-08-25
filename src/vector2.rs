@@ -11,6 +11,14 @@ impl Vector2f {
         Vector2f { x, y }
     }
 
+    pub fn to_bits(v: Vector2f) -> (u32, u32) {
+        (f32::to_bits(v.x), f32::to_bits(v.y))
+    }
+
+    pub fn from_bits(v: (u32, u32)) -> Vector2f {
+        Vector2f::new(f32::from_bits(v.0), f32::from_bits(v.1))
+    }
+
     pub fn dot(&self, other: Vector2f) -> f32 {
         self.x * other.x + self.y * other.y
     }

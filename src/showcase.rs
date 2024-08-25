@@ -11,7 +11,7 @@ use crate::intersections::{self, SegmentId, SegmentIntersection};
 use crate::polygon::{Contour, Polygon};
 use crate::triangulation::{self, Triangle};
 use crate::vector2::Vector2f;
-use crate::{partition, regions};
+use crate::{interior, partition, regions};
 
 #[derive(PartialEq, Eq)]
 enum DrawingMode {
@@ -57,10 +57,14 @@ impl Showcase {
     ) -> Showcase {
         let epsilon = 0.01;
         let mut stages = Vec::new();
-        for polygon in polygons {
+        for (idx, polygon) in polygons.into_iter().enumerate() {
+            println!("Triangulating polygon {}", idx);
             let intersections = intersections::find_intersections(&polygon, epsilon);
-            let intersection_graph = graph::build_graph(&polygon, &intersections, epsilon);
+            let subdivided_contours =
+                intersections::get_subdivided_contours(&polygon, &intersections, epsilon);
+            let intersection_graph = graph::build_graph(&subdivided_contours, epsilon);
             let regions = regions::trace_regions(intersection_graph.clone());
+            interior::calculate_winding_numbers(&subdivided_contours, &regions);
 
             let mut partition_graph = intersection_graph.clone();
             for region in regions.iter().skip(1) {

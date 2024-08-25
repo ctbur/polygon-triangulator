@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::mem;
 
-use crate::polygon::Polygon;
+use crate::polygon::{Contour, Polygon};
 use crate::vector2::Vector2f;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
@@ -181,6 +181,120 @@ fn intersect_segment_and_point(p0: Vector2f, p1: Vector2f, point: Vector2f, epsi
     }
 
     return true;
+}
+
+fn strip_intersection_type(
+    intersections: &HashMap<SegmentId, Vec<SegmentIntersection>>,
+) -> HashMap<SegmentId, Vec<Vector2f>> {
+    let mut stripped = HashMap::new();
+
+    for (segment_id, intersections) in intersections.iter() {
+        let mut stripped_intersections = Vec::new();
+        for intersection in intersections.iter() {
+            match intersection {
+                SegmentIntersection::Point(p) => stripped_intersections.push(*p),
+                SegmentIntersection::Segment(p1, p2) => {
+                    stripped_intersections.push(*p1);
+                    stripped_intersections.push(*p2);
+                }
+                _ => panic!("Unexpected intersection type"),
+            }
+        }
+        stripped.insert(*segment_id, stripped_intersections);
+    }
+
+    return stripped;
+}
+
+fn merge_nearby_points(
+    intersections: &HashMap<SegmentId, Vec<Vector2f>>,
+    epsilon: f32,
+) -> HashMap<SegmentId, Vec<Vector2f>> {
+    let mut merged = intersections.clone();
+    let mut encountered_points = Vec::new();
+
+    for (_, points) in merged.iter_mut() {
+        for point in points.iter_mut() {
+            // search encountered_points for a point that is closer than epsilon
+            let mut found_neighbor_point: Option<&Vector2f> = None;
+            for encountered_point in encountered_points.iter() {
+                if (*point - *encountered_point).length_squared() <= epsilon * epsilon {
+                    found_neighbor_point = Some(encountered_point);
+                    break;
+                }
+            }
+
+            if let Some(neighbor_point) = found_neighbor_point {
+                // replace point with neighbor_point
+                *point = *neighbor_point;
+            } else {
+                // add point to encountered_points
+                encountered_points.push(*point);
+            }
+        }
+    }
+
+    return merged;
+}
+
+pub fn get_subdivided_contours(
+    polygon: &Polygon,
+    intersections: &HashMap<SegmentId, Vec<SegmentIntersection>>,
+    epsilon: f32,
+) -> Vec<Contour> {
+    let stripped_intersections = strip_intersection_type(intersections);
+    let mut merged_intersections = merge_nearby_points(&stripped_intersections, epsilon);
+
+    let mut subdivided_contours = Vec::new();
+
+    for (contour_idx, contour) in polygon.contours().iter().enumerate() {
+        let mut subdivided_contour = Contour::new();
+        for (segment_idx, start_point) in contour.iter().enumerate() {
+            let end_point = contour[(segment_idx + 1) % contour.len()];
+
+            let seg_id = SegmentId {
+                contour: contour_idx,
+                segment: segment_idx,
+            };
+            // calling unwrap because every line must have an intersection at the start and endpoint
+            let intersections_opt = merged_intersections.get_mut(&seg_id);
+            if intersections_opt.is_none() {
+                panic!(
+                    "Segment with ID ({}, {}) has no intersections",
+                    seg_id.contour, seg_id.segment
+                );
+            }
+            let intersections = intersections_opt.unwrap();
+
+            // sort intersection points along the segment going from start_point to end_point
+            let segment_vec = end_point - *start_point;
+            intersections.sort_by(|p1, p2| {
+                let v1 = segment_vec.dot(*p1 - *start_point);
+                let v2 = segment_vec.dot(*p2 - *start_point);
+                return f32::total_cmp(&v1, &v2);
+            });
+
+            // skip the last one, otherwise the corners are double
+            for i in 0..intersections.len() - 1 {
+                if let Some(&last) = subdivided_contour.last() {
+                    if Vector2f::to_bits(last) == Vector2f::to_bits(intersections[i]) {
+                        continue;
+                    }
+                }
+                subdivided_contour.push(intersections[i]);
+            }
+        }
+
+        if Vector2f::to_bits(subdivided_contour[0])
+            == Vector2f::to_bits(*subdivided_contour.last().unwrap())
+        {
+            subdivided_contour.pop();
+        }
+
+        subdivided_contours.push(subdivided_contour);
+    }
+
+    return subdivided_contours;
 }
 
 #[cfg(test)]
