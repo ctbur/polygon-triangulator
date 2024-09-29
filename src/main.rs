@@ -1,4 +1,5 @@
 mod graph;
+mod hierarchy;
 mod intersections;
 mod partition;
 mod polygon;
@@ -21,6 +22,7 @@ fn main() {
         showcase::get_rounded_rect(),
         showcase::get_overlapping_rects(),
         showcase::get_grid(),
+        showcase::get_nested_boxes(),
     ];
     let mut showcase = showcase::Showcase::build(rl, thread, polygons);
 

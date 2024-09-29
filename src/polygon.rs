@@ -55,6 +55,16 @@ impl Polygon {
     pub fn contours(&self) -> &Vec<Contour> {
         &self.contours
     }
+
+    pub fn calculate_winding_number(&self, point: Vector2f) -> i32 {
+        let mut winding_number = 0;
+
+        for contour in &self.contours {
+            winding_number += calculate_winding_number(contour, point);
+        }
+
+        return winding_number;
+    }
 }
 
 /// Uses the shoelace formulate to calculate the signed polygon area.
@@ -122,6 +132,37 @@ pub fn is_region_x_monotone(region: &Contour) -> bool {
     return true;
 }
 
+/// Calculate the winding number of a contour around a point.
+/// This function returns 0 for points on the boundary.
+pub fn calculate_winding_number(contour: &Contour, point: Vector2f) -> i32 {
+    let mut winding_number = 0;
+
+    println!("WN");
+    for i in 0..contour.len() {
+        let (from, to) = (contour[i], contour[(i + 1) % contour.len()]);
+
+        let cross = (to - from).cross(point - from);
+        // edge goes through point -> point is on boundary
+        if cross == 0.0 {
+            return 0;
+        }
+
+        if from.y <= point.y && point.y < to.y {
+            // upward crossing
+            if cross > 0.0 {
+                winding_number += 1;
+            }
+        } else if to.y < point.y && point.y <= from.y {
+            // downward crossing
+            if cross <= 0.0 {
+                winding_number -= 1;
+            }
+        }
+    }
+
+    return winding_number;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,5 +183,55 @@ mod tests {
 
         let rev_area = calculate_region_area(&region);
         assert_eq!(rev_area, -2.0);
+    }
+
+    #[test]
+    fn test_calculate_winding_number() {
+        let mut contour = vec![
+            Vector2f::new(1.0, 1.0),
+            Vector2f::new(2.0, 2.0),
+            Vector2f::new(1.0, 3.0),
+            Vector2f::new(0.0, 2.0),
+        ];
+
+        let mut wn = 1;
+        for _ in 0..2 {
+            // inside
+            assert_eq!(
+                calculate_winding_number(&contour, Vector2f::new(1.0, 1.5)),
+                wn
+            );
+            // corner
+            for &c in &contour {
+                assert_eq!(
+                    calculate_winding_number(&contour, c),
+                    0,
+                    "corner {} is considered inside contour",
+                    c
+                );
+            }
+            // on edge
+            assert_eq!(
+                calculate_winding_number(&contour, Vector2f::new(0.5, 1.5)),
+                0
+            );
+            assert_eq!(
+                calculate_winding_number(&contour, Vector2f::new(1.5, 2.5)),
+                0
+            );
+            // outside
+            assert_eq!(
+                calculate_winding_number(&contour, Vector2f::new(0.0, 0.0)),
+                0
+            );
+            assert_eq!(
+                calculate_winding_number(&contour, Vector2f::new(2.0, 3.0)),
+                0
+            );
+
+            // repeat in CW order
+            contour.reverse();
+            wn = -wn;
+        }
     }
 }

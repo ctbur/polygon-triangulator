@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     intersections::{SegmentId, SegmentIntersection},
     polygon::Polygon,
-    vector2::Vector2f,
+    vector2::{Vector2f, Vector2fBits},
 };
 
 #[derive(Debug, Clone)]
@@ -15,16 +15,14 @@ pub struct Node {
 #[derive(Debug, Clone)]
 pub struct Graph {
     nodes: Vec<Node>,
-    position_lookup: HashMap<(i64, i64), usize>,
-    epsilon: f32,
+    position_lookup: HashMap<Vector2fBits, usize>,
 }
 
 impl Graph {
-    pub fn new(epsilon: f32) -> Self {
+    pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
             position_lookup: HashMap::new(),
-            epsilon,
         }
     }
 
@@ -45,8 +43,8 @@ impl Graph {
     }
 
     fn get_or_insert_node(&mut self, position: Vector2f) -> usize {
-        let position_i64 = self.position_to_i64(position);
-        if let Some(index) = self.position_lookup.get(&position_i64) {
+        let position_bits = Vector2f::to_bits(position);
+        if let Some(index) = self.position_lookup.get(&position_bits) {
             return *index;
         }
 
@@ -55,16 +53,9 @@ impl Graph {
             position,
             edges: Vec::new(),
         });
-        self.position_lookup.insert(position_i64, index);
+        self.position_lookup.insert(position_bits, index);
 
         return index;
-    }
-
-    fn position_to_i64(&self, position: Vector2f) -> (i64, i64) {
-        (
-            ((position.x as f64) / (self.epsilon as f64)).floor() as i64,
-            ((position.y as f64) / (self.epsilon as f64)).floor() as i64,
-        )
     }
 
     pub fn nodes(&self) -> &Vec<Node> {
@@ -138,7 +129,7 @@ pub fn build_graph(
     let stripped_intersections = strip_intersection_type(intersections);
     let mut merged_intersections = merge_nearby_points(&stripped_intersections, epsilon);
 
-    let mut graph = Graph::new(epsilon);
+    let mut graph = Graph::new();
 
     for (contour_idx, contour) in polygon.contours().iter().enumerate() {
         for (segment_idx, start_point) in contour.iter().enumerate() {

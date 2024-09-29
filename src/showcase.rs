@@ -378,13 +378,21 @@ fn draw_triangulations<'a, T>(
     let mut color_idx = 0;
     for (c, triangles) in triangluations {
         for t in triangles {
-            println!("{},{},{}", c[t[0]], c[t[1]], c[t[2]],);
             d.draw_triangle(
                 c[t[0]],
                 c[t[1]],
                 c[t[2]],
                 COLOR_SEQUENCE[color_idx % COLOR_SEQUENCE.len()],
             );
+        }
+        color_idx += 1;
+    }
+
+    for (c, triangles) in triangluations {
+        for t in triangles {
+            d.draw_line_ex(c[t[0]], c[t[1]], 3.0, Color::BLACK);
+            d.draw_line_ex(c[t[1]], c[t[2]], 3.0, Color::BLACK);
+            d.draw_line_ex(c[t[2]], c[t[0]], 3.0, Color::BLACK);
         }
         color_idx += 1;
     }
@@ -513,4 +521,48 @@ pub fn get_grid() -> Polygon {
     }
 
     polygon
+}
+
+fn add_box(polygon: &mut Polygon, v1: Vector2f, v2: Vector2f) {
+    polygon.move_to(v1.x, v1.y);
+    polygon.line_to(v2.x, v1.y);
+    polygon.line_to(v2.x, v2.y);
+    polygon.line_to(v1.x, v2.y);
+}
+
+pub fn get_nested_boxes() -> Polygon {
+    let mut polygon = Polygon::new();
+
+    add_box(
+        &mut polygon,
+        Vector2f::new(50.0, 50.0),
+        Vector2f::new(850.0, 850.0),
+    );
+    add_box(
+        &mut polygon,
+        Vector2f::new(100.0, 100.0),
+        Vector2f::new(500.0, 500.0),
+    );
+    add_box(
+        &mut polygon,
+        Vector2f::new(600.0, 150.0),
+        Vector2f::new(700.0, 300.0),
+    );
+    add_box(
+        &mut polygon,
+        Vector2f::new(200.0, 200.0),
+        Vector2f::new(300.0, 300.0),
+    );
+    add_box(
+        &mut polygon,
+        Vector2f::new(150.0, 600.0),
+        Vector2f::new(700.0, 750.0),
+    );
+    add_box(
+        &mut polygon,
+        Vector2f::new(200.0, 550.0),
+        Vector2f::new(650.0, 700.0),
+    );
+
+    return polygon;
 }

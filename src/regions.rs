@@ -69,6 +69,9 @@ pub fn trace_regions(graph: Graph) -> Vec<Contour> {
         });
     }
 
+    // split graph into connected components
+    // TODO ...
+
     let mut regions = Vec::new();
     loop {
         // angle 0 points in +X, with edges going CCW
