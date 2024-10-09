@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::graph::Graph;
 use crate::polygon::Contour;
@@ -34,9 +34,14 @@ impl Node {
     }
 }
 
+pub struct Island {
+    pub outline: Contour,
+    pub interior: Vec<Contour>,
+}
+
 /// Traces the regions (faces) of the planar graph. The first region is the outline.
 /// The outline always runs CCW, the interior regions run CW.
-pub fn trace_regions(graph: Graph) -> Vec<Contour> {
+pub fn trace_regions(graph: Graph) -> Vec<Island> {
     let mut graph_nodes = graph.into_nodes();
 
     // sort edges in CCW order
@@ -53,6 +58,7 @@ pub fn trace_regions(graph: Graph) -> Vec<Contour> {
         });
     }
 
+    // convert graph::Node into Node
     let mut nodes = Vec::new();
     for node in graph_nodes.into_iter() {
         let mut edge_to_edge_idx = HashMap::new();
@@ -69,76 +75,101 @@ pub fn trace_regions(graph: Graph) -> Vec<Contour> {
         });
     }
 
-    // split graph into connected components
-    // TODO ...
+    // angle 0 points in +X direction, with edges going CCW
+    // -> trace islands, in order of y-value to ensure that the first region is the outline
+    let mut node_indices_by_y = Vec::from_iter(0..nodes.len());
+    node_indices_by_y.sort_by(|&i, &j| f32::total_cmp(&nodes[i].position.y, &nodes[j].position.y));
 
-    let mut regions = Vec::new();
-    loop {
-        // angle 0 points in +X, with edges going CCW
-        // -> find point with lowest y value to start tracing with outline region
-        let mut node_idx_lowest_y = None;
-        for (node_idx, node) in nodes.iter().enumerate() {
-            if node.first_untraced_index().is_none() {
-                continue;
-            }
-
-            match node_idx_lowest_y {
-                None => node_idx_lowest_y = Some(node_idx),
-                Some(idx) => {
-                    if node.position.y < nodes[idx].position.y {
-                        node_idx_lowest_y = Some(idx);
-                    }
-                }
-            }
+    let mut islands = Vec::new();
+    for i in node_indices_by_y {
+        if nodes[i].first_untraced_index().is_none() {
+            continue;
         }
 
-        if node_idx_lowest_y.is_none() {
-            // no nodes are left
-            break;
-        }
-
-        let mut region = Contour::new();
-        let start_node_idx = node_idx_lowest_y.unwrap();
-        let start_outgoing_edge_idx = nodes[start_node_idx].first_untraced_index().unwrap();
-
-        let mut current_node_idx = start_node_idx;
-        let mut current_outgoing_edge_idx = start_outgoing_edge_idx;
-        loop {
-            // add point to contour
-            let current_node = &mut nodes[current_node_idx];
-            region.push(current_node.position);
-
-            // mark the edge as traced
-            if current_node.traced_edges[current_outgoing_edge_idx] {
-                panic!("Edge traced twice");
-            }
-            current_node.traced_edges[current_outgoing_edge_idx] = true;
-
-            // traverse the edge
-            let previous_node_idx = current_node_idx;
-            current_node_idx = current_node.edges[current_outgoing_edge_idx];
-
-            // find incoming edge on connecting node
-            let current_node = &nodes[current_node_idx];
-            let incoming_edge_idx = *current_node
-                .edge_to_edge_idx
-                .get(&previous_node_idx)
-                .unwrap();
-
-            // new outgoing edge is next to incomine one, rotating CCW, i.e.,
-            // we need to take the next edge in order of edge index
-            current_outgoing_edge_idx = current_node.next_edge_ccw(incoming_edge_idx);
-
-            // if we reached original node and edge, we are done
-            if current_node_idx == start_node_idx
-                && current_outgoing_edge_idx == start_outgoing_edge_idx
-            {
-                break;
-            }
-        }
-
-        regions.push(region);
+        let island = trace_island(&mut nodes, i);
+        islands.push(island);
     }
 
-    return regions;
+    return islands;
+}
+
+fn trace_island(nodes: &mut Vec<Node>, node_idx_lowest_y: usize) -> Island {
+    let outline = trace_region(nodes, node_idx_lowest_y);
+
+    let mut island_node_indices = find_island(nodes, node_idx_lowest_y);
+    let mut interior = Vec::new();
+    while let Some(&node_idx) = island_node_indices.iter().next() {
+        if nodes[node_idx].first_untraced_index().is_none() {
+            island_node_indices.remove(&node_idx);
+            continue;
+        }
+
+        let region = trace_region(nodes, node_idx);
+        interior.push(region);
+    }
+
+    return Island { outline, interior };
+}
+
+fn find_island(nodes: &mut Vec<Node>, start_node_idx: usize) -> HashSet<usize> {
+    let mut island_node_indices = HashSet::new();
+
+    let mut stack = Vec::new();
+    island_node_indices.insert(start_node_idx);
+    stack.extend(&nodes[start_node_idx].edges);
+
+    while !stack.is_empty() {
+        if let Some(&node_idx) = stack.last() {
+            if !island_node_indices.contains(node_idx) {
+                island_node_indices.insert(*node_idx);
+                stack.extend(&nodes[*node_idx].edges)
+            } else {
+                stack.pop();
+            }
+        }
+    }
+
+    return island_node_indices;
+}
+
+fn trace_region(nodes: &mut Vec<Node>, start_node_idx: usize) -> Contour {
+    let mut region = Contour::new();
+    let start_outgoing_edge_idx = nodes[start_node_idx].first_untraced_index().unwrap();
+
+    let mut current_node_idx = start_node_idx;
+    let mut current_outgoing_edge_idx = start_outgoing_edge_idx;
+
+    loop {
+        // add point to contour
+        let current_node = &mut nodes[current_node_idx];
+        region.push(current_node.position);
+
+        // mark the edge as traced
+        if current_node.traced_edges[current_outgoing_edge_idx] {
+            panic!("Edge traced twice");
+        }
+        current_node.traced_edges[current_outgoing_edge_idx] = true;
+
+        // traverse the edge
+        let previous_node_idx = current_node_idx;
+        current_node_idx = current_node.edges[current_outgoing_edge_idx];
+
+        // find incoming edge on connecting node
+        let current_node = &nodes[current_node_idx];
+        let incoming_edge_idx = *current_node
+            .edge_to_edge_idx
+            .get(&previous_node_idx)
+            .unwrap();
+
+        // new outgoing edge is next to incomine one, rotating CCW, i.e.,
+        // we need to take the next edge in order of edge index
+        current_outgoing_edge_idx = current_node.next_edge_ccw(incoming_edge_idx);
+
+        // if we reached original node and edge, we are done
+        if current_node_idx == start_node_idx
+            && current_outgoing_edge_idx == start_outgoing_edge_idx
+        {
+            return region;
+        }
+    }
 }

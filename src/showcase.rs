@@ -9,6 +9,7 @@ use raylib::prelude::*;
 use crate::graph::{self, Graph};
 use crate::intersections::{self, SegmentId, SegmentIntersection};
 use crate::polygon::{Contour, Polygon};
+use crate::regions::Island;
 use crate::triangulation::{self, Triangle};
 use crate::vector2::Vector2f;
 use crate::{partition, regions};
@@ -35,8 +36,8 @@ struct TriangulationStages {
     polygon: Polygon,
     intersections: HashMap<SegmentId, Vec<SegmentIntersection>>,
     graph: Graph,
-    regions: Vec<Contour>,
-    monotone_regions: Vec<Contour>,
+    islands: Vec<Island>,
+    monotone_islands: Vec<Island>,
     triangulations: Vec<(Contour, Vec<Triangle>)>,
 }
 
@@ -60,27 +61,32 @@ impl Showcase {
         for polygon in polygons {
             let intersections = intersections::find_intersections(&polygon, epsilon);
             let intersection_graph = graph::build_graph(&polygon, &intersections, epsilon);
-            let regions = regions::trace_regions(intersection_graph.clone());
+            let islands = regions::trace_regions(intersection_graph.clone());
 
             let mut partition_graph = intersection_graph.clone();
-            for region in regions.iter().skip(1) {
-                partition::partition_region(&mut partition_graph, region);
+            for island in &islands {
+                for region in &island.interior {
+                    partition::partition_region(&mut partition_graph, region);
+                }
             }
-            let monotone_regions = regions::trace_regions(partition_graph);
+            // islands where all regions are monotone
+            let monotone_islands = regions::trace_regions(partition_graph);
 
             let mut triangulations = Vec::new();
-            for region in monotone_regions.iter().skip(1) {
-                let mut triangles = Vec::new();
-                triangulation::triangulate_monotone_region(&mut triangles, region);
-                triangulations.push((region.clone(), triangles));
+            for island in &islands {
+                for region in &island.interior {
+                    let mut triangles = Vec::new();
+                    triangulation::triangulate_monotone_region(&mut triangles, region);
+                    triangulations.push((region.clone(), triangles));
+                }
             }
 
             let stage = TriangulationStages {
                 polygon,
                 intersections,
                 graph: intersection_graph,
-                regions,
-                monotone_regions,
+                islands,
+                monotone_islands,
                 triangulations,
             };
             stages.push(stage);
@@ -201,10 +207,10 @@ impl Showcase {
             }
             DrawingMode::Graph => draw_graph(&mut c, &self.stages[self.selected_polygon].graph),
             DrawingMode::Regions => {
-                draw_regions(&mut c, &self.stages[self.selected_polygon].regions)
+                draw_regions(&mut c, &self.stages[self.selected_polygon].islands)
             }
             DrawingMode::MonotoneRegions => {
-                draw_regions(&mut c, &self.stages[self.selected_polygon].monotone_regions)
+                draw_regions(&mut c, &self.stages[self.selected_polygon].monotone_islands)
             }
             DrawingMode::Triangulation => {
                 draw_triangulations(&mut c, &self.stages[self.selected_polygon].triangulations);
@@ -296,23 +302,32 @@ fn draw_graph<'a, T>(d: &mut RaylibMode2D<'a, T>, graph: &Graph) {
     }
 }
 
-fn draw_regions<'a, T>(d: &mut RaylibMode2D<'a, T>, regions: &Vec<Contour>) {
+fn draw_regions<'a, T>(d: &mut RaylibMode2D<'a, T>, islands: &Vec<Island>) {
     let mut rng = StdRng::seed_from_u64(1234567890);
-    for (i, region) in regions.iter().enumerate() {
-        let color = COLOR_SEQUENCE[i % COLOR_SEQUENCE.len()].alpha(0.5);
+    for island in islands {
+        draw_contour(
+            d,
+            &island.outline,
+            Vector2f::ZERO,
+            8.0,
+            Color::BLACK.alpha(0.3),
+        );
+        for (i, region) in island.interior.iter().enumerate() {
+            let color = COLOR_SEQUENCE[i % COLOR_SEQUENCE.len()].alpha(0.5);
 
-        let magnitude = rng.gen_range(0.0..10.0);
-        let angle = rng.gen_range(0.0..2.0 * f32::consts::PI)
-            + ((SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
-                % 2000) as f32)
-                / 2000.0
-                * 2.0
-                * f32::consts::PI;
-        let offset = Vector2f::new(angle.sin(), angle.cos()) * magnitude;
-        draw_contour(d, region, offset, 4.0, color);
+            let magnitude = rng.gen_range(0.0..10.0);
+            let angle = rng.gen_range(0.0..2.0 * f32::consts::PI)
+                + ((SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis()
+                    % 2000) as f32)
+                    / 2000.0
+                    * 2.0
+                    * f32::consts::PI;
+            let offset = Vector2f::new(angle.sin(), angle.cos()) * magnitude;
+            draw_contour(d, region, offset, 4.0, color);
+        }
     }
 }
 
