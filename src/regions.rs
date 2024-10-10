@@ -34,6 +34,7 @@ impl Node {
     }
 }
 
+#[derive(Clone)]
 pub struct Island {
     pub outline: Contour,
     pub interior: Vec<Contour>,

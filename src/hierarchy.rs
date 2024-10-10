@@ -1,80 +1,103 @@
-use std::mem;
+use crate::{
+    polygon::{self, Contour},
+    regions::Island,
+};
 
-use crate::polygon::{self, Contour};
-
-pub struct OuterNode {
+pub struct IslandNode {
     // runs in CCW order
     pub outline: Contour,
-    pub interior: Vec<InnerNode>,
+    pub interior: Vec<InteriorNode>,
 }
 
-pub struct InnerNode {
+pub struct InteriorNode {
     // runs in CW order
     pub region: Contour,
-    pub children: Vec<OuterNode>,
+    pub children: Vec<IslandNode>,
 }
 
 /// Creates a hierarchy of regions that describes which regions contain which other ones.
 /// `regions` is a sequence of CCW regions each followed by one or more CW regions.
 /// The regions are provided in increasing min-y-coordinate.
-pub fn create_region_hierarchy(regions: Vec<Contour>) -> OuterNode {
-    let mut outer_nodes = Vec::new();
-
-    for region in regions {
-        let is_ccw = polygon::calculate_region_area(&region) > 0.0;
-        if is_ccw {
-            outer_nodes.push(OuterNode {
-                outline: region,
-                interior: Vec::new(),
-            })
-        } else {
-            let outer_node = outer_nodes.last_mut().expect("First region is not CCW");
-            outer_node.interior.push(InnerNode {
+pub fn build_region_hierarchy(islands: Vec<Island>) -> Vec<IslandNode> {
+    let mut island_nodes = Vec::with_capacity(islands.len());
+    for island in islands {
+        let mut interior_nodes = Vec::with_capacity(island.interior.len());
+        for region in island.interior {
+            interior_nodes.push(InteriorNode {
                 region,
                 children: Vec::new(),
             })
         }
+        island_nodes.push(IslandNode {
+            outline: island.outline,
+            interior: interior_nodes,
+        })
     }
 
-    // check for all outlines if they are contained in any interior region
-
-    panic!()
+    build_hierarchy_from_island_nodes(&mut island_nodes);
+    return island_nodes;
 }
 
-fn ligma(mut outer_nodes: Vec<OuterNode>) -> Vec<OuterNode> {
-    let mut current = outer_nodes.remove(0);
-    let mut outer_nodes_outside = Vec::new();
-
-    // iterate over outer_nodes once in order to make sure the order is preserved
-    for outer_node in outer_nodes {
-        let mut new_parent_idx_opt = None;
-        for (idx, inner_node) in current.interior.iter_mut().enumerate() {
-            if are_regions_nested(&inner_node.region, &outer_node.outline) {
-                new_parent_idx_opt = Some(idx);
+fn build_hierarchy_from_island_nodes(island_nodes: &mut Vec<IslandNode>) {
+    // check all island nodes with each other and move inside if contained
+    let mut container_idx = 0;
+    while container_idx < island_nodes.len() {
+        let mut containee_idx = 0;
+        while containee_idx < island_nodes.len() {
+            if container_idx == containee_idx {
+                containee_idx += 1;
+                continue;
             }
+
+            if let Some(interior_node_idx) = find_interior_node_containing_island_node(
+                &island_nodes[container_idx],
+                &island_nodes[containee_idx],
+            ) {
+                // move containee into container node
+                let containee = island_nodes.remove(containee_idx);
+                island_nodes[container_idx].interior[interior_node_idx]
+                    .children
+                    .push(containee);
+
+                // update iterator
+                if container_idx > containee_idx {
+                    container_idx -= 1;
+                }
+            }
+
+            containee_idx += 1;
         }
 
-        if let Some(new_parent_idx) = new_parent_idx_opt {
-            current.interior[new_parent_idx].children.push(outer_node);
-        } else {
-            outer_nodes_outside.push(outer_node);
+        container_idx += 1;
+    }
+
+    // repeat build hierarchy for all children for multiple nesting
+    for island_node in island_nodes {
+        for interior_node in &mut island_node.interior {
+            build_hierarchy_from_island_nodes(&mut interior_node.children);
+        }
+    }
+}
+
+fn find_interior_node_containing_island_node(
+    container: &IslandNode,
+    containee: &IslandNode,
+) -> Option<usize> {
+    if !are_regions_nested(&container.outline, &containee.outline) {
+        return None;
+    }
+
+    for (idx, interior_node) in container.interior.iter().enumerate() {
+        if are_regions_nested(&interior_node.region, &containee.outline) {
+            return Some(idx);
         }
     }
 
-    for inner_node in &mut current.interior {
-        let children = mem::replace(&mut inner_node.children, Vec::new());
-        inner_node.children = ligma(children);
-    }
-
-    let mut result = vec![current];
-    if !outer_nodes_outside.is_empty() {
-        result.append(&mut ligma(outer_nodes_outside));
-    }
-    return result;
+    panic!("Node is contained by outline but not by interior region");
 }
 
 fn are_regions_nested(container: &Contour, containee: &Contour) -> bool {
-    panic!()
+    return polygon::calculate_winding_number(container, containee[0]) != 0;
 }
 
 #[cfg(test)]
