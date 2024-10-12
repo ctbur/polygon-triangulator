@@ -12,6 +12,7 @@ use crate::polygon::{Contour, Polygon};
 use crate::regions::Island;
 use crate::triangulation::{self, Triangle};
 use crate::vector2::Vector2f;
+use crate::winding_numbers::WindingRule;
 use crate::{hierarchy, partition, regions, winding_numbers};
 
 #[derive(PartialEq, Eq)]
@@ -67,9 +68,10 @@ impl Showcase {
                 &islands,
                 &polygon.contours(),
                 &mut proximity_merger,
+                WindingRule::Odd,
             );
 
-            let hierarchy = hierarchy::build_region_hierarchy(islands.clone());
+            let hierarchy = hierarchy::build_region_hierarchy(&islands);
 
             let mut partition_graph = intersection_graph.clone();
             for island in &islands {

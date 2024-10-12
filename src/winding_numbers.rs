@@ -189,11 +189,18 @@ impl<'a> SweepState<'a> {
     }
 }
 
+pub struct RegionId {
+    island: usize,
+    region: usize,
+}
+
 pub fn calculate_regions_inside(
     islands: &[Island],
     contours: &[Contour],
+    // TODO: move this elsewhere
     proximity_merger: &mut ProximityMerger,
-) -> Vec<i32> {
+    winding_rule: WindingRule,
+) -> Vec<RegionId> {
     debugp!(DBG_WN, "# Start calculate_regions_inside");
 
     // align contour with region points
@@ -259,6 +266,7 @@ pub fn calculate_regions_inside(
     });
 
     // run plane sweep to calculate winding numbers
+    let mut regions_inside = Vec::new();
     let mut sweep_state = SweepState {
         contours: &aligned_contours,
         edges: Vec::new(),
@@ -280,12 +288,20 @@ pub fn calculate_regions_inside(
                     // then we calculate the winding number
                     let winding_number = sweep_state
                         .calculate_winding_number(region_entry.upper_from, region_entry.upper_to);
+                    let inside = winding_rule.is_inside(winding_number);
+                    if inside {
+                        regions_inside.push(RegionId {
+                            island: region_entry.island,
+                            region: region_entry.region,
+                        });
+                    }
                     debugp!(
                         DBG_WN,
-                        "Region ({}, {}) has winding number {}",
+                        "Region ({}, {}) has winding number {} and is inside: {}",
                         region_entry.island,
                         region_entry.region,
-                        winding_number
+                        winding_number,
+                        inside
                     );
                 }
             }
@@ -301,7 +317,7 @@ pub fn calculate_regions_inside(
     }
 
     debugp!(DBG_WN, "# End calculate_regions_inside");
-    return Vec::new();
+    return regions_inside;
 }
 
 #[derive(Debug, PartialEq, Eq)]
