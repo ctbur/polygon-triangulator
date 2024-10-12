@@ -3,6 +3,9 @@ name = "polygon-triangulation"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+debug_print = []
+
 [dependencies]
 raylib = "5.0"
 rand = "0.8.5"

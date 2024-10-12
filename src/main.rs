@@ -1,3 +1,4 @@
+mod debug_print;
 mod graph;
 mod hierarchy;
 mod intersections;
@@ -7,8 +8,11 @@ mod regions;
 mod showcase;
 mod triangulation;
 mod vector2;
+mod winding_numbers;
 
 fn main() {
+    debug_print::enable_topic("winding numbers");
+
     let (mut rl, thread) = raylib::init()
         .size(2500, 1500)
         .title("Hello, World")

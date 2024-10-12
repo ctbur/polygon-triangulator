@@ -137,7 +137,6 @@ pub fn is_region_x_monotone(region: &Contour) -> bool {
 pub fn calculate_winding_number(contour: &Contour, point: Vector2f) -> i32 {
     let mut winding_number = 0;
 
-    println!("WN");
     for i in 0..contour.len() {
         let (from, to) = (contour[i], contour[(i + 1) % contour.len()]);
 

@@ -1,6 +1,9 @@
 use core::f32;
 
+use crate::debugp;
 use crate::polygon::{self, Contour};
+
+const DBG_TRI: &str = "triangulation";
 
 pub type Triangle = [usize; 3];
 
@@ -19,7 +22,7 @@ impl<'a> MonotoneRegionTriangulator<'a> {
         region: &'a Contour,
         start_idx: usize,
     ) -> MonotoneRegionTriangulator<'a> {
-        println!("Start: {}", start_idx);
+        debugp!(DBG_TRI, "Start: {}", start_idx);
         MonotoneRegionTriangulator {
             triangles,
             region,
@@ -46,12 +49,17 @@ impl<'a> MonotoneRegionTriangulator<'a> {
     }
 
     fn end(&mut self, point_idx: usize) {
-        println!("End: {} - reflex chain: {:?}", point_idx, self.reflex_chain);
+        debugp!(
+            DBG_TRI,
+            "End: {} - reflex chain: {:?}",
+            point_idx,
+            self.reflex_chain
+        );
         self.process_all(point_idx);
     }
 
     fn process_all(&mut self, point_idx: usize) {
-        println!("Case 1: drain");
+        debugp!(DBG_TRI, "Case 1: drain");
         // Case 1: process the reflex chain fully
         let mut prev_ref_chain_idx = self.reflex_chain.pop().unwrap();
         while let Some(ref_chain_idx) = self.reflex_chain.pop() {
@@ -61,7 +69,7 @@ impl<'a> MonotoneRegionTriangulator<'a> {
     }
 
     fn process_visible(&mut self, point_idx: usize) {
-        println!("Case 2: Reflex or not");
+        debugp!(DBG_TRI, "Case 2: Reflex or not");
         // Case 2: process the reflex chain until reflex_chain[-2] is not visible from point
         // i.e., point -> reflex_chain[-1] -> reflex_chain[-2] is reflex
         while self.reflex_chain.len() >= 2 && !self.is_top_point_reflex(point_idx) {
@@ -101,7 +109,7 @@ pub fn triangulate_monotone_region(triangles: &mut Vec<Triangle>, region: &Conto
 
     if polygon::calculate_region_area(region) > 0.0 {
         //panic!("Region needs to run in CW order");
-        println!("Skipping region not running in CW order");
+        debugp!(DBG_TRI, "Skipping region not running in CW order");
         return;
     }
 
@@ -133,7 +141,8 @@ pub fn triangulate_monotone_region(triangles: &mut Vec<Triangle>, region: &Conto
             point_idx = lower_idx;
             lower_idx = (lower_idx + region.len() - 1) % region.len();
         }
-        println!(
+        debugp!(
+            DBG_TRI,
             "Next event: {}, {} - reflex chain: {:?}, upper_idx: {}, lower_idx: {}",
             point_idx,
             if is_upper_point { "upper" } else { "lower" },

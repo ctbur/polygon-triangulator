@@ -6,6 +6,31 @@ use crate::{
     vector2::{Vector2f, Vector2fBits},
 };
 
+pub struct ProximityMerger {
+    epsilon: f32,
+    encountered_points: Vec<Vector2f>,
+}
+
+impl ProximityMerger {
+    pub fn new(epsilon: f32) -> ProximityMerger {
+        ProximityMerger {
+            epsilon,
+            encountered_points: Vec::new(),
+        }
+    }
+
+    pub fn map(&mut self, point: Vector2f) -> Vector2f {
+        for &encountered_point in self.encountered_points.iter() {
+            if (point - encountered_point).length_squared() <= self.epsilon * self.epsilon {
+                return encountered_point;
+            }
+        }
+
+        self.encountered_points.push(point);
+        return point;
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Node {
     pub position: Vector2f,
@@ -91,30 +116,14 @@ fn strip_intersection_type(
 }
 
 fn merge_nearby_points(
+    proximity_merger: &mut ProximityMerger,
     intersections: &HashMap<SegmentId, Vec<Vector2f>>,
-    epsilon: f32,
 ) -> HashMap<SegmentId, Vec<Vector2f>> {
     let mut merged = intersections.clone();
-    let mut encountered_points = Vec::new();
 
     for (_, points) in merged.iter_mut() {
         for point in points.iter_mut() {
-            // search encountered_points for a point that is closer than epsilon
-            let mut found_neighbor_point: Option<&Vector2f> = None;
-            for encountered_point in encountered_points.iter() {
-                if (*point - *encountered_point).length_squared() <= epsilon * epsilon {
-                    found_neighbor_point = Some(encountered_point);
-                    break;
-                }
-            }
-
-            if let Some(neighbor_point) = found_neighbor_point {
-                // replace point with neighbor_point
-                *point = *neighbor_point;
-            } else {
-                // add point to encountered_points
-                encountered_points.push(*point);
-            }
+            *point = proximity_merger.map(*point);
         }
     }
 
@@ -125,9 +134,12 @@ pub fn build_graph(
     polygon: &Polygon,
     intersections: &HashMap<SegmentId, Vec<SegmentIntersection>>,
     epsilon: f32,
-) -> Graph {
+) -> (Graph, ProximityMerger) {
     let stripped_intersections = strip_intersection_type(intersections);
-    let mut merged_intersections = merge_nearby_points(&stripped_intersections, epsilon);
+
+    let mut proximity_merger = ProximityMerger::new(epsilon);
+    let mut merged_intersections =
+        merge_nearby_points(&mut proximity_merger, &stripped_intersections);
 
     let mut graph = Graph::new();
 
@@ -164,5 +176,5 @@ pub fn build_graph(
         }
     }
 
-    return graph;
+    return (graph, proximity_merger);
 }

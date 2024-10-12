@@ -12,7 +12,7 @@ use crate::polygon::{Contour, Polygon};
 use crate::regions::Island;
 use crate::triangulation::{self, Triangle};
 use crate::vector2::Vector2f;
-use crate::{hierarchy, partition, regions};
+use crate::{hierarchy, partition, regions, winding_numbers};
 
 #[derive(PartialEq, Eq)]
 enum DrawingMode {
@@ -60,8 +60,14 @@ impl Showcase {
         let mut stages = Vec::new();
         for polygon in polygons {
             let intersections = intersections::find_intersections(&polygon, epsilon);
-            let intersection_graph = graph::build_graph(&polygon, &intersections, epsilon);
+            let (intersection_graph, mut proximity_merger) =
+                graph::build_graph(&polygon, &intersections, epsilon);
             let islands = regions::trace_regions(intersection_graph.clone());
+            winding_numbers::calculate_regions_inside(
+                &islands,
+                &polygon.contours(),
+                &mut proximity_merger,
+            );
 
             let hierarchy = hierarchy::build_region_hierarchy(islands.clone());
 

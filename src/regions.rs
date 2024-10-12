@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::graph::Graph;
-use crate::polygon::Contour;
+use crate::polygon::{calculate_region_area, Contour};
 use crate::vector2::Vector2f;
 
 struct Node {
@@ -36,7 +36,9 @@ impl Node {
 
 #[derive(Clone)]
 pub struct Island {
+    // runs CCW
     pub outline: Contour,
+    // runs CW
     pub interior: Vec<Contour>,
 }
 
@@ -88,10 +90,25 @@ pub fn trace_regions(graph: Graph) -> Vec<Island> {
         }
 
         let island = trace_island(&mut nodes, i);
+        debug_assert!(island_contour_windings_are_valid(&island));
         islands.push(island);
     }
 
     return islands;
+}
+
+fn island_contour_windings_are_valid(island: &Island) -> bool {
+    if calculate_region_area(&island.outline) <= 0.0 {
+        return false;
+    }
+
+    for interior in &island.interior {
+        if calculate_region_area(interior) >= 0.0 {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 fn trace_island(nodes: &mut Vec<Node>, node_idx_lowest_y: usize) -> Island {

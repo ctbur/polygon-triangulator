@@ -1,13 +1,12 @@
 use core::f32;
 use std::cmp::Ordering;
 
+use crate::debugp;
 use crate::graph::Graph;
 use crate::polygon::{self, Contour};
-use crate::vector2::Vector2f;
+use crate::vector2::{comp_points_x_dir, Vector2f};
 
-fn comp_points_x_dir(a: Vector2f, b: Vector2f) -> Ordering {
-    return f32::total_cmp(&a.x, &b.x).then_with(|| f32::total_cmp(&a.y, &b.y));
-}
+const DBG_PART: &str = "partition";
 
 struct Edge {
     from: usize,
@@ -22,9 +21,13 @@ struct SweepLineState<'a> {
 
 impl<'a> SweepLineState<'a> {
     fn insert_edge_pair(&mut self, lower: Edge, upper: Edge) {
-        println!(
+        debugp!(
+            DBG_PART,
             "Insert edge pair: ({}->{}), ({}->{})",
-            lower.from, lower.to, upper.from, upper.to
+            lower.from,
+            lower.to,
+            upper.from,
+            upper.to
         );
         // find edge immediately above upper.from
         // insert below
@@ -38,7 +41,7 @@ impl<'a> SweepLineState<'a> {
         is_merge_point: bool,
         ccw: bool,
     ) -> (Edge, Edge) {
-        println!("Delete edge pair to {}", to_point_idx);
+        debugp!(DBG_PART, "Delete edge pair to {}", to_point_idx);
 
         let mut first_idx = None;
         for (idx, edge) in self.edges.iter().enumerate() {
@@ -70,18 +73,25 @@ impl<'a> SweepLineState<'a> {
             (predecessor, successor)
         };
 
-        println!(
+        debugp!(
+            DBG_PART,
             "Lower: ({}->{}), Upper. ({}->{})",
-            tmp.0.from, tmp.0.to, tmp.1.from, tmp.1.to
+            tmp.0.from,
+            tmp.0.to,
+            tmp.1.from,
+            tmp.1.to
         );
 
         return tmp;
     }
 
     fn replace_edge(&mut self, to_point_idx: usize, new_edge: Edge) -> Edge {
-        println!(
+        debugp!(
+            DBG_PART,
             "Replace edge to {} with ({}->{})",
-            to_point_idx, new_edge.from, new_edge.to
+            to_point_idx,
+            new_edge.from,
+            new_edge.to
         );
         let mut edge_idx = None;
         for (idx, edge) in self.edges.iter().enumerate() {
@@ -116,7 +126,8 @@ impl<'a> SweepLineState<'a> {
                 immediate_upper_edge = Some(edge);
             }
         }
-        println!(
+        debugp!(
+            DBG_PART,
             "Find edge above {}: ({}->{})",
             point_idx,
             immediate_upper_edge.as_ref().unwrap().from,
@@ -150,6 +161,7 @@ pub fn partition_region(graph: &mut Graph, region: &Contour) {
     }
 
     // check if the region is running CCW
+    // TODO: this isn't necessary as regions always run CW
     let ccw = polygon::calculate_region_area(region) > 0.0;
 
     // contains indices of region which are going to be sorted
@@ -158,7 +170,7 @@ pub fn partition_region(graph: &mut Graph, region: &Contour) {
 
     for point_idx in &points_order {
         let point = region[*point_idx];
-        println!("point: {}, idx: {}", point, point_idx);
+        debugp!(DBG_PART, "point: {}, idx: {}", point, point_idx);
     }
 
     // sweep across plane from x-direction
@@ -170,20 +182,29 @@ pub fn partition_region(graph: &mut Graph, region: &Contour) {
     for &point_idx in &points_order {
         let prev_idx = prev_point_idx(region, point_idx, ccw);
         let next_idx = next_point_idx(region, point_idx, ccw);
-        println!(
+        debugp!(
+            DBG_PART,
             "\nindex: ccw: {} - prev: {}, point: {}, next: {}",
-            ccw, prev_idx, point_idx, next_idx
+            ccw,
+            prev_idx,
+            point_idx,
+            next_idx
         );
 
         let prev = region[prev_idx];
         let point = region[point_idx];
         let next = region[next_idx];
-        println!(
+        debugp!(
+            DBG_PART,
             "coords: ccw: {} - prev: {}, point: {}, next: {}",
-            ccw, prev, point, next
+            ccw,
+            prev,
+            point,
+            next
         );
 
-        println!(
+        debugp!(
+            DBG_PART,
             "Looking at point {}, type {:?}",
             point_idx,
             categorize_point(prev, point, next),
@@ -214,9 +235,11 @@ pub fn partition_region(graph: &mut Graph, region: &Contour) {
                 // top_edge = find edge immediately above v
                 // diagonal connect point_idx to top_edge.helper
                 let top_edge = sweep_line.find_edge_above(point_idx);
-                println!(
+                debugp!(
+                    DBG_PART,
                     "Splitting polygon with edge from {} to {}",
-                    point_idx, top_edge.helper
+                    point_idx,
+                    top_edge.helper
                 );
                 graph.insert_segment(region[point_idx], region[top_edge.helper]);
 
@@ -243,9 +266,12 @@ pub fn partition_region(graph: &mut Graph, region: &Contour) {
                 fix_up(graph, region, ccw, point_idx, top_edge);
                 fix_up(graph, region, ccw, point_idx, &lower);
                 // top_edge.helper = point_idx - persist in state
-                println!(
+                debugp!(
+                    DBG_PART,
                     "Set edge ({}->{}) helper to {}",
-                    top_edge.from, top_edge.to, point_idx
+                    top_edge.from,
+                    top_edge.to,
+                    point_idx
                 );
                 top_edge.helper = point_idx;
             }
@@ -276,14 +302,20 @@ fn fix_up(graph: &mut Graph, region: &Contour, ccw: bool, point_idx: usize, edge
     let prev = region[prev_point_idx(region, edge.helper, ccw)];
     let next = region[next_point_idx(region, edge.helper, ccw)];
 
-    println!(
+    debugp!(
+        DBG_PART,
         "Fix up: P={}, E=({}->{}), H={}",
-        point_idx, edge.from, edge.to, edge.helper
+        point_idx,
+        edge.from,
+        edge.to,
+        edge.helper
     );
     if categorize_point(prev, region[edge.helper], next) == PointType::Merge {
-        println!(
+        debugp!(
+            DBG_PART,
             "Splitting polygon with edge from {} to {}",
-            edge.helper, point_idx
+            edge.helper,
+            point_idx
         );
         graph.insert_segment(region[edge.helper], region[point_idx]);
     }
@@ -352,7 +384,7 @@ mod tests {
     }
 
     fn get_graph(region: &Contour) -> Graph {
-        let mut graph = Graph::new(0.01);
+        let mut graph = Graph::new();
         for i in 0..region.len() {
             graph.insert_segment(region[i], region[(i + 1) % region.len()]);
         }
@@ -363,8 +395,10 @@ mod tests {
         let monotone_polygons = regions::trace_regions(graph);
 
         // check if polygons really are x-monotone
-        for region in monotone_polygons.iter().skip(1) {
-            assert!(polygon::is_region_x_monotone(region))
+        for island in monotone_polygons.iter() {
+            for region in &island.interior {
+                assert!(polygon::is_region_x_monotone(region))
+            }
         }
     }
 

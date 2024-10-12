@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Vector2f {
     pub x: f32,
@@ -160,4 +162,8 @@ impl Into<raylib::ffi::Vector2> for Vector2f {
             y: self.y,
         }
     }
+}
+
+pub fn comp_points_x_dir(a: Vector2f, b: Vector2f) -> Ordering {
+    return f32::total_cmp(&a.x, &b.x).then_with(|| f32::total_cmp(&a.y, &b.y));
 }
