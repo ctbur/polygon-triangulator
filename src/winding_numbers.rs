@@ -1,8 +1,8 @@
 use crate::debugp;
 use crate::{
+    graph::Island,
     graph::ProximityMerger,
     polygon::Contour,
-    regions::Island,
     vector2::{self, Vector2f},
 };
 use std::cmp::Ordering;
@@ -395,6 +395,11 @@ mod tests {
 
         let mut proximity_merger = ProximityMerger::new(0.001);
 
-        calculate_regions_inside(&[island], &[contour], &mut proximity_merger);
+        calculate_regions_inside(
+            &[island],
+            &[contour],
+            &mut proximity_merger,
+            WindingRule::Odd,
+        );
     }
 }

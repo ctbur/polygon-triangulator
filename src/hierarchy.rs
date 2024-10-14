@@ -1,6 +1,6 @@
 use crate::{
+    graph::Island,
     polygon::{self, Contour},
-    regions::Island,
 };
 
 pub struct IslandNode {
