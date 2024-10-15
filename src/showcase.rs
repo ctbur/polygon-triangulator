@@ -83,9 +83,6 @@ impl Showcase {
             let mut monotone_islands = Vec::new();
             for i in 0..island_graphs.len() {
                 for region in &islands[i].interior {
-                    fn edge_cnt(g: &Graph) -> usize {
-                        g.nodes().iter().map(|n| n.edges().len()).sum()
-                    }
                     partition::partition_region(&mut island_graphs[i], region);
                     monotone_islands.push(island_graphs[i].trace_regions());
                 }

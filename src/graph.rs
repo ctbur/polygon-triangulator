@@ -67,15 +67,6 @@ impl Node {
         return false;
     }
 
-    fn first_untraced_index(&self) -> Option<usize> {
-        for (idx, traced) in self.traced_edges.iter().enumerate() {
-            if !traced {
-                return Some(idx);
-            }
-        }
-        return None;
-    }
-
     fn next_edge_ccw(&self, current_idx: usize) -> usize {
         debug_assert!(!self.dirty);
         if current_idx >= self.edges.len() {
@@ -272,33 +263,34 @@ impl Graph {
         // reset traced edges
         for node in &mut self.nodes {
             node.traced_edges.clear();
-            for _ in 0..node.edges.len() {
-                node.traced_edges.push(false);
-            }
+            node.traced_edges.resize(node.edges.len(), false);
         }
 
         // since we start with node with min y, the first region is the outline
-        let outline = self.trace_region(node_idx_min_y);
+        let outline = self.trace_region(node_idx_min_y, 0);
 
         let mut interior = Vec::new();
         for node_idx in 0..self.nodes.len() {
-            if self.nodes[node_idx].first_untraced_index().is_none() {
-                continue;
-            }
+            for edge_idx in 0..self.nodes[node_idx].traced_edges.len() {
+                if self.nodes[node_idx].traced_edges[edge_idx] {
+                    continue;
+                }
 
-            let region = self.trace_region(node_idx);
-            interior.push(region);
+                let region = self.trace_region(node_idx, edge_idx);
+                interior.push(region);
+            }
         }
 
         let island = Island { outline, interior };
+        // all edges were traced
+        debug_assert!(self.nodes.iter().all(|n| n.traced_edges.iter().all(|&t| t)));
         debug_assert!(island_contour_windings_are_valid(&island));
         debug_assert!(region_edge_count_matches_graph(&self, &island));
         return island;
     }
 
-    fn trace_region(&mut self, start_node_idx: usize) -> Contour {
+    fn trace_region(&mut self, start_node_idx: usize, start_outgoing_edge_idx: usize) -> Contour {
         let mut region = Contour::new();
-        let start_outgoing_edge_idx = self.nodes[start_node_idx].first_untraced_index().unwrap();
 
         let mut current_node_idx = start_node_idx;
         let mut current_outgoing_edge_idx = start_outgoing_edge_idx;
@@ -372,7 +364,7 @@ fn region_edge_count_matches_graph(graph: &Graph, island: &Island) -> bool {
     let region_edge_count =
         island.outline.len() + island.interior.iter().map(|r| r.len()).sum::<usize>();
     println!("graph: {}, island: {}", graph_edge_count, region_edge_count);
-    return graph_edge_count == region_edge_count || true;
+    return graph_edge_count == region_edge_count;
 }
 
 fn strip_intersection_type(
