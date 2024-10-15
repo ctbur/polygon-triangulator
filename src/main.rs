@@ -1,13 +1,12 @@
 mod debug_print;
+mod decomposition;
 mod graph;
-mod hierarchy;
 mod intersections;
 mod partition;
 mod polygon;
 mod showcase;
 mod triangulation;
 mod vector2;
-mod winding_numbers;
 
 fn main() {
     debug_print::enable_topic("winding numbers");

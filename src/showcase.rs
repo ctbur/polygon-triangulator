@@ -6,13 +6,14 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use raylib::prelude::*;
 
-use crate::graph::{self, Graph, Island};
+use crate::decomposition::Island;
+use crate::decomposition::WindingRule;
+use crate::graph::{self, Graph};
 use crate::intersections::{self, SegmentId, SegmentIntersection};
 use crate::polygon::{Contour, Polygon};
 use crate::triangulation::{self, Triangle};
 use crate::vector2::Vector2f;
-use crate::winding_numbers::WindingRule;
-use crate::{hierarchy, partition, winding_numbers};
+use crate::{decomposition, partition};
 
 #[derive(PartialEq, Eq)]
 enum DrawingMode {
@@ -36,8 +37,8 @@ struct TriangulationStages {
     polygon: Polygon,
     intersections: HashMap<SegmentId, Vec<SegmentIntersection>>,
     graph: Graph,
-    islands: Vec<Island>,
-    monotone_islands: Vec<Island>,
+    islands: Vec<(Contour, Vec<Contour>)>,
+    monotone_regions: Vec<(Contour, Vec<Contour>)>,
     triangulations: Vec<(Contour, Vec<Triangle>)>,
 }
 
@@ -63,12 +64,21 @@ impl Showcase {
             let subdivided_contours =
                 intersections::subdivide_contours_at_intersections(&polygon, epsilon);
             let intersection_graph = graph::build_graph(&subdivided_contours);
-            let mut island_graphs = intersection_graph.clone().split_by_islands();
-            let islands: Vec<_> = island_graphs
-                .iter_mut()
-                .map(|g| g.trace_regions())
+
+            let island_graphs = intersection_graph.clone().split_by_islands();
+            let mut islands: Vec<_> = island_graphs
+                .into_iter()
+                .map(|mut graph| {
+                    let (outline, interior) = graph.trace_regions();
+                    Island {
+                        graph,
+                        outline,
+                        interior,
+                    }
+                })
                 .collect();
-            winding_numbers::calculate_regions_inside(
+
+            decomposition::calculate_regions_inside(
                 &islands,
                 &subdivided_contours,
                 WindingRule::Odd,
@@ -77,15 +87,15 @@ impl Showcase {
             // find all interior regions that are not visible
             // get the outline of that
 
-            let hierarchy = hierarchy::build_region_hierarchy(&islands);
+            let hierarchy = decomposition::build_region_hierarchy(&islands);
 
             // islands where all regions are monotone
-            let mut monotone_islands = Vec::new();
-            for i in 0..island_graphs.len() {
-                for region in &islands[i].interior {
-                    partition::partition_region(&mut island_graphs[i], region);
-                    monotone_islands.push(island_graphs[i].trace_regions());
+            let mut monotone_regions = Vec::new();
+            for island in &mut islands {
+                for region in &island.interior {
+                    partition::partition_region(&mut island.graph, region);
                 }
+                monotone_regions.push(island.graph.trace_regions());
             }
 
             let mut triangulations = Vec::new();
@@ -101,8 +111,11 @@ impl Showcase {
                 polygon,
                 intersections,
                 graph: intersection_graph,
-                islands,
-                monotone_islands,
+                islands: islands
+                    .into_iter()
+                    .map(|i| (i.outline, i.interior))
+                    .collect(),
+                monotone_regions,
                 triangulations,
             };
             stages.push(stage);
@@ -226,7 +239,7 @@ impl Showcase {
                 draw_regions(&mut c, &self.stages[self.selected_polygon].islands)
             }
             DrawingMode::MonotoneRegions => {
-                draw_regions(&mut c, &self.stages[self.selected_polygon].monotone_islands)
+                draw_regions(&mut c, &self.stages[self.selected_polygon].monotone_regions)
             }
             DrawingMode::Triangulation => {
                 draw_triangulations(&mut c, &self.stages[self.selected_polygon].triangulations);
@@ -318,17 +331,11 @@ fn draw_graph<'a, T>(d: &mut RaylibMode2D<'a, T>, graph: &Graph) {
     }
 }
 
-fn draw_regions<'a, T>(d: &mut RaylibMode2D<'a, T>, islands: &Vec<Island>) {
+fn draw_regions<'a, T>(d: &mut RaylibMode2D<'a, T>, regions: &Vec<(Contour, Vec<Contour>)>) {
     let mut rng = StdRng::seed_from_u64(1234567890);
-    for island in islands {
-        draw_contour(
-            d,
-            &island.outline,
-            Vector2f::ZERO,
-            8.0,
-            Color::BLACK.alpha(0.3),
-        );
-        for (i, region) in island.interior.iter().enumerate() {
+    for (ref outline, ref interior) in regions {
+        draw_contour(d, &outline, Vector2f::ZERO, 8.0, Color::BLACK.alpha(0.3));
+        for (i, region) in interior.iter().enumerate() {
             let color = COLOR_SEQUENCE[i % COLOR_SEQUENCE.len()].alpha(0.5);
 
             let magnitude = rng.gen_range(0.0..10.0);

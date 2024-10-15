@@ -2,8 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::mem;
 
 use crate::{
-    intersections::{SegmentId, SegmentIntersection},
-    polygon::{calculate_region_area, Contour, Polygon},
+    polygon::{calculate_region_area, Contour},
     vector2::{Vector2f, Vector2fBits},
 };
 
@@ -62,8 +61,6 @@ impl Node {
 
 #[derive(Debug, Clone)]
 pub struct Graph {
-    #[cfg(debug_assertions)]
-    island: bool,
     nodes: Vec<Node>,
     position_lookup: HashMap<Vector2fBits, usize>,
 }
@@ -71,8 +68,6 @@ pub struct Graph {
 impl Graph {
     pub fn new() -> Self {
         Self {
-            #[cfg(debug_assertions)]
-            island: false,
             nodes: Vec::new(),
             position_lookup: HashMap::new(),
         }
@@ -96,7 +91,6 @@ impl Graph {
             return *index;
         }
 
-        debug_assert!(!self.island);
         let index = self.nodes.len();
         self.nodes.push(Node::new(position));
         self.position_lookup.insert(position_bits, index);
@@ -143,8 +137,6 @@ impl Graph {
             }
 
             subgraphs.push(Graph {
-                #[cfg(debug_assertions)]
-                island: true,
                 nodes: graph_nodes,
                 position_lookup: graph_position_lookup,
             });
@@ -203,7 +195,7 @@ impl Graph {
     /// Traces the regions (faces) of the planar graph. The first traced region is the outline.
     /// The outline always runs CCW, the interior regions run CW.
     /// The result of this function is only valid if there are no disjoint islands.
-    pub fn trace_regions(&mut self) -> Island {
+    pub fn trace_regions(&mut self) -> (Contour, Vec<Contour>) {
         // clean up nodes: sort edges in CCW order and create edge reverse lookup
         let nodes_ptr = self.nodes.as_ptr();
         for node in &mut self.nodes {
@@ -256,12 +248,11 @@ impl Graph {
             }
         }
 
-        let island = Island { outline, interior };
         // all edges were traced
         debug_assert!(self.nodes.iter().all(|n| n.traced_edges.iter().all(|&t| t)));
-        debug_assert!(island_contour_windings_are_valid(&island));
-        debug_assert!(region_edge_count_matches_graph(&self, &island));
-        return island;
+        debug_assert!(contour_windings_are_valid(&outline, &interior));
+        debug_assert!(region_edge_count_matches_graph(&self, &outline, &interior));
+        return (outline, interior);
     }
 
     fn trace_region(&mut self, start_node_idx: usize, start_outgoing_edge_idx: usize) -> Contour {
@@ -310,20 +301,12 @@ impl Graph {
     }
 }
 
-#[derive(Clone)]
-pub struct Island {
-    // runs CCW
-    pub outline: Contour,
-    // runs CW
-    pub interior: Vec<Contour>,
-}
-
-fn island_contour_windings_are_valid(island: &Island) -> bool {
-    if calculate_region_area(&island.outline) <= 0.0 {
+fn contour_windings_are_valid(outline: &Contour, interior: &Vec<Contour>) -> bool {
+    if calculate_region_area(outline) <= 0.0 {
         return false;
     }
 
-    for interior in &island.interior {
+    for interior in interior {
         if calculate_region_area(interior) >= 0.0 {
             return false;
         }
@@ -332,13 +315,15 @@ fn island_contour_windings_are_valid(island: &Island) -> bool {
     return true;
 }
 
-fn region_edge_count_matches_graph(graph: &Graph, island: &Island) -> bool {
+fn region_edge_count_matches_graph(
+    graph: &Graph,
+    outline: &Contour,
+    interior: &Vec<Contour>,
+) -> bool {
     // counts each edge twice because it's bidirectional
     let graph_edge_count: usize = graph.nodes.iter().map(|n| n.edges.len()).sum();
     // counts each edge twice because each edge is traced in both directions
-    let region_edge_count =
-        island.outline.len() + island.interior.iter().map(|r| r.len()).sum::<usize>();
-    println!("graph: {}, island: {}", graph_edge_count, region_edge_count);
+    let region_edge_count = outline.len() + interior.iter().map(|r| r.len()).sum::<usize>();
     return graph_edge_count == region_edge_count;
 }
 
