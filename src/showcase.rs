@@ -60,8 +60,9 @@ impl Showcase {
         let mut stages = Vec::new();
         for polygon in polygons {
             let intersections = intersections::find_intersections(&polygon, epsilon);
-            let (intersection_graph, mut proximity_merger) =
-                graph::build_graph(&polygon, &intersections, epsilon);
+            let subdivided_contours =
+                intersections::subdivide_contours_at_intersections(&polygon, epsilon);
+            let intersection_graph = graph::build_graph(&subdivided_contours);
             let mut island_graphs = intersection_graph.clone().split_by_islands();
             let islands: Vec<_> = island_graphs
                 .iter_mut()
@@ -69,8 +70,7 @@ impl Showcase {
                 .collect();
             winding_numbers::calculate_regions_inside(
                 &islands,
-                &polygon.contours(),
-                &mut proximity_merger,
+                &subdivided_contours,
                 WindingRule::Odd,
             );
             // for each thing that is visible

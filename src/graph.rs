@@ -7,31 +7,6 @@ use crate::{
     vector2::{Vector2f, Vector2fBits},
 };
 
-pub struct ProximityMerger {
-    epsilon: f32,
-    encountered_points: Vec<Vector2f>,
-}
-
-impl ProximityMerger {
-    pub fn new(epsilon: f32) -> ProximityMerger {
-        ProximityMerger {
-            epsilon,
-            encountered_points: Vec::new(),
-        }
-    }
-
-    pub fn map(&mut self, point: Vector2f) -> Vector2f {
-        for &encountered_point in self.encountered_points.iter() {
-            if (point - encountered_point).length_squared() <= self.epsilon * self.epsilon {
-                return encountered_point;
-            }
-        }
-
-        self.encountered_points.push(point);
-        return point;
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Node {
     position: Vector2f,
@@ -367,89 +342,15 @@ fn region_edge_count_matches_graph(graph: &Graph, island: &Island) -> bool {
     return graph_edge_count == region_edge_count;
 }
 
-fn strip_intersection_type(
-    intersections: &HashMap<SegmentId, Vec<SegmentIntersection>>,
-) -> HashMap<SegmentId, Vec<Vector2f>> {
-    let mut stripped = HashMap::new();
-
-    for (segment_id, intersections) in intersections.iter() {
-        let mut stripped_intersections = Vec::new();
-        for intersection in intersections.iter() {
-            match intersection {
-                SegmentIntersection::Point(p) => stripped_intersections.push(*p),
-                SegmentIntersection::Segment(p1, p2) => {
-                    stripped_intersections.push(*p1);
-                    stripped_intersections.push(*p2);
-                }
-                _ => panic!("Unexpected intersection type"),
-            }
-        }
-        stripped.insert(*segment_id, stripped_intersections);
-    }
-
-    return stripped;
-}
-
-fn merge_nearby_points(
-    proximity_merger: &mut ProximityMerger,
-    intersections: &HashMap<SegmentId, Vec<Vector2f>>,
-) -> HashMap<SegmentId, Vec<Vector2f>> {
-    let mut merged = intersections.clone();
-
-    for (_, points) in merged.iter_mut() {
-        for point in points.iter_mut() {
-            *point = proximity_merger.map(*point);
-        }
-    }
-
-    return merged;
-}
-
-pub fn build_graph(
-    polygon: &Polygon,
-    intersections: &HashMap<SegmentId, Vec<SegmentIntersection>>,
-    epsilon: f32,
-) -> (Graph, ProximityMerger) {
-    let stripped_intersections = strip_intersection_type(intersections);
-
-    let mut proximity_merger = ProximityMerger::new(epsilon);
-    let mut merged_intersections =
-        merge_nearby_points(&mut proximity_merger, &stripped_intersections);
-
+pub fn build_graph(subdivided_contours: &[Contour]) -> Graph {
     let mut graph = Graph::new();
 
-    for (contour_idx, contour) in polygon.contours().iter().enumerate() {
-        for (segment_idx, start_point) in contour.iter().enumerate() {
-            let end_point = contour[(segment_idx + 1) % contour.len()];
-
-            let seg_id = SegmentId {
-                contour: contour_idx,
-                segment: segment_idx,
-            };
-            // calling unwrap because every line must have an intersection at the start and endpoint
-            let intersections_opt = merged_intersections.get_mut(&seg_id);
-            if intersections_opt.is_none() {
-                panic!(
-                    "Segment with ID ({}, {}) has no intersections",
-                    seg_id.contour, seg_id.segment
-                );
-            }
-            let intersections = intersections_opt.unwrap();
-
-            // sort intersection points along the segment going from start_point to end_point
-            let segment_vec = end_point - *start_point;
-            intersections.sort_by(|p1, p2| {
-                let v1 = segment_vec.dot(*p1 - *start_point);
-                let v2 = segment_vec.dot(*p2 - *start_point);
-                return f32::total_cmp(&v1, &v2);
-            });
-
-            // each pair in order is a sub-segment
-            for i in 0..intersections.len() - 1 {
-                graph.insert_segment(intersections[i], intersections[i + 1]);
-            }
+    for contour in subdivided_contours {
+        for current in 0..contour.len() {
+            let next = (current + 1) % contour.len();
+            graph.insert_segment(contour[current], contour[next]);
         }
     }
 
-    return (graph, proximity_merger);
+    return graph;
 }

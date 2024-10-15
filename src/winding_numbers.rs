@@ -1,7 +1,6 @@
 use crate::debugp;
 use crate::{
     graph::Island,
-    graph::ProximityMerger,
     polygon::Contour,
     vector2::{self, Vector2f},
 };
@@ -197,37 +196,9 @@ pub struct RegionId {
 pub fn calculate_regions_inside(
     islands: &[Island],
     contours: &[Contour],
-    // TODO: move this elsewhere
-    proximity_merger: &mut ProximityMerger,
     winding_rule: WindingRule,
 ) -> Vec<RegionId> {
     debugp!(DBG_WN, "# Start calculate_regions_inside");
-
-    // align contour with region points
-    let mut aligned_contours = Vec::with_capacity(contours.len());
-    for contour in contours {
-        let mut aligned_contour = Vec::new();
-
-        for &point in contour {
-            let aligned_point = proximity_merger.map(point);
-
-            // don't add duplicate points
-            if let Some(&prev) = aligned_contour.last() {
-                if aligned_point == prev {
-                    continue;
-                }
-            }
-
-            aligned_contour.push(aligned_point);
-        }
-
-        // ensure start and end are not duplicates either
-        while aligned_contour[0] == *aligned_contour.last().unwrap() {
-            aligned_contour.pop();
-        }
-
-        aligned_contours.push(aligned_contour);
-    }
 
     // find leftmost point for each region and put in lookup map
     let mut region_by_min_x = HashMap::new();
@@ -248,8 +219,8 @@ pub fn calculate_regions_inside(
     }
 
     // create segment IDs
-    let mut point_ids = Vec::with_capacity(aligned_contours.iter().map(|c| c.len()).sum());
-    for (contour_idx, contour) in aligned_contours.iter().enumerate() {
+    let mut point_ids = Vec::with_capacity(contours.iter().map(|c| c.len()).sum());
+    for (contour_idx, contour) in contours.iter().enumerate() {
         for point_idx in 0..contour.len() {
             point_ids.push(PointId {
                 contour: contour_idx,
@@ -259,21 +230,18 @@ pub fn calculate_regions_inside(
     }
     // sort by x-direction
     point_ids.sort_by(|a, b| {
-        vector2::comp_points_x_dir(
-            aligned_contours[a.contour][a.point],
-            aligned_contours[b.contour][b.point],
-        )
+        vector2::comp_points_x_dir(contours[a.contour][a.point], contours[b.contour][b.point])
     });
 
     // run plane sweep to calculate winding numbers
     let mut regions_inside = Vec::new();
     let mut sweep_state = SweepState {
-        contours: &aligned_contours,
+        contours: &contours,
         edges: Vec::new(),
     };
     let mut prev_point_opt = None;
     for point_id in point_ids {
-        let contour = &aligned_contours[point_id.contour];
+        let contour = &contours[point_id.contour];
 
         let prev = contour[(point_id.point + contour.len() - 1) % contour.len()];
         let point = contour[point_id.point];
@@ -338,39 +306,6 @@ fn categorize_point(prev: Vector2f, point: Vector2f, next: Vector2f) -> PointTyp
         (Ordering::Less, Ordering::Greater) => PointType::Chain,
         (_, _) => panic!("Region contains repeated points"),
     };
-}
-
-fn find_center_of_ear(region: Contour) -> Vector2f {
-    for i in 0..region.len() {
-        let (a, b, c) = (i, (i + 1) % region.len(), (i + 2) % region.len());
-
-        let mut ear = true;
-        for (j, &p) in region.iter().enumerate() {
-            if j == a || j == b || j == c {
-                continue;
-            }
-
-            if is_point_in_triangle(p, [region[a], region[b], region[c]]) {
-                ear = false;
-                break;
-            }
-        }
-
-        if ear {
-            return (region[a] + region[b] + region[c]) / 3.0;
-        }
-    }
-
-    // mathematically there should always be an ear
-    panic!()
-}
-
-fn is_point_in_triangle(p: Vector2f, t: [Vector2f; 3]) -> bool {
-    let e0 = (t[1] - t[0]).cross(p);
-    let e1 = (t[2] - t[1]).cross(p);
-    let e2 = (t[0] - t[2]).cross(p);
-
-    return e0 == e1 && e1 == e2;
 }
 
 #[cfg(test)]
