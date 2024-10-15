@@ -6,14 +6,13 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use raylib::prelude::*;
 
-use crate::graph::{self, Graph};
+use crate::graph::{self, Graph, Island};
 use crate::intersections::{self, SegmentId, SegmentIntersection};
 use crate::polygon::{Contour, Polygon};
-use crate::regions::Island;
 use crate::triangulation::{self, Triangle};
 use crate::vector2::Vector2f;
 use crate::winding_numbers::WindingRule;
-use crate::{hierarchy, partition, regions, winding_numbers};
+use crate::{hierarchy, partition, winding_numbers};
 
 #[derive(PartialEq, Eq)]
 enum DrawingMode {
@@ -63,24 +62,31 @@ impl Showcase {
             let intersections = intersections::find_intersections(&polygon, epsilon);
             let (intersection_graph, mut proximity_merger) =
                 graph::build_graph(&polygon, &intersections, epsilon);
-            let islands = regions::trace_regions(intersection_graph.clone());
+            let mut island_graphs = intersection_graph.clone().split_by_islands();
+            let islands: Vec<_> = island_graphs
+                .iter_mut()
+                .map(|g| g.trace_regions())
+                .collect();
             winding_numbers::calculate_regions_inside(
                 &islands,
                 &polygon.contours(),
                 &mut proximity_merger,
                 WindingRule::Odd,
             );
+            // for each thing that is visible
+            // find all interior regions that are not visible
+            // get the outline of that
 
             let hierarchy = hierarchy::build_region_hierarchy(&islands);
 
-            let mut partition_graph = intersection_graph.clone();
-            for island in &islands {
-                for region in &island.interior {
-                    partition::partition_region(&mut partition_graph, region);
+            // islands where all regions are monotone
+            let mut monotone_islands = Vec::new();
+            for i in 0..island_graphs.len() {
+                for region in &islands[i].interior {
+                    partition::partition_region(&mut island_graphs[i], region);
+                    monotone_islands.push(island_graphs[i].trace_regions());
                 }
             }
-            // islands where all regions are monotone
-            let monotone_islands = regions::trace_regions(partition_graph);
 
             let mut triangulations = Vec::new();
             for island in &islands {
@@ -279,7 +285,7 @@ fn draw_graph<'a, T>(d: &mut RaylibMode2D<'a, T>, graph: &Graph) {
         while let Some(node_idx) = node_stack.pop() {
             let node = &nodes[node_idx];
 
-            for other_node_idx in &node.edges {
+            for other_node_idx in node.edges() {
                 if visited_nodes.contains(other_node_idx) {
                     continue;
                 }
@@ -297,8 +303,8 @@ fn draw_graph<'a, T>(d: &mut RaylibMode2D<'a, T>, graph: &Graph) {
                         * f32::consts::PI;
                 let offset = Vector2f::new(angle.sin(), angle.cos()) * magnitude;
                 d.draw_line_ex(
-                    node.position + offset,
-                    other_node.position + offset,
+                    node.position() + offset,
+                    other_node.position() + offset,
                     4.0,
                     COLOR_SEQUENCE[color_counter % COLOR_SEQUENCE.len()],
                 );
