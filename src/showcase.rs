@@ -6,7 +6,6 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use raylib::prelude::*;
 
-use crate::decomposition::Island;
 use crate::decomposition::WindingRule;
 use crate::graph::{self, Graph};
 use crate::intersections::{self, SegmentId, SegmentIntersection};
@@ -63,44 +62,27 @@ impl Showcase {
             let intersections = intersections::find_intersections(&polygon, epsilon);
             let subdivided_contours =
                 intersections::subdivide_contours_at_intersections(&polygon, epsilon);
-            let intersection_graph = graph::build_graph(&subdivided_contours);
+            let graph = graph::build_graph(&subdivided_contours);
 
-            let island_graphs = intersection_graph.clone().split_by_islands();
-            let mut islands: Vec<_> = island_graphs
-                .into_iter()
-                .map(|mut graph| {
-                    let (outline, interior) = graph.trace_regions();
-                    Island {
-                        graph,
-                        outline,
-                        interior,
-                    }
-                })
+            let mut island_graphs = graph.clone().split_by_islands();
+            let islands: Vec<_> = island_graphs
+                .iter_mut()
+                .map(|g| g.trace_regions())
                 .collect();
-
-            decomposition::calculate_regions_inside(
-                &islands,
-                &subdivided_contours,
-                WindingRule::Odd,
-            );
-            // for each thing that is visible
-            // find all interior regions that are not visible
-            // get the outline of that
-
-            let hierarchy = decomposition::build_region_hierarchy(&islands);
+            decomposition::decompose(graph.clone(), &subdivided_contours, WindingRule::Odd);
 
             // islands where all regions are monotone
             let mut monotone_regions = Vec::new();
-            for island in &mut islands {
-                for region in &island.interior {
-                    partition::partition_region(&mut island.graph, region);
+            for (i, (_, ref interior)) in islands.iter().enumerate() {
+                for region in interior {
+                    partition::partition_region(&mut island_graphs[i], region);
                 }
-                monotone_regions.push(island.graph.trace_regions());
+                monotone_regions.push(island_graphs[i].trace_regions());
             }
 
             let mut triangulations = Vec::new();
-            for island in &islands {
-                for region in &island.interior {
+            for (_, ref interior) in &islands {
+                for region in interior {
                     let mut triangles = Vec::new();
                     triangulation::triangulate_monotone_region(&mut triangles, region);
                     triangulations.push((region.clone(), triangles));
@@ -110,11 +92,8 @@ impl Showcase {
             let stage = TriangulationStages {
                 polygon,
                 intersections,
-                graph: intersection_graph,
-                islands: islands
-                    .into_iter()
-                    .map(|i| (i.outline, i.interior))
-                    .collect(),
+                graph,
+                islands,
                 monotone_regions,
                 triangulations,
             };

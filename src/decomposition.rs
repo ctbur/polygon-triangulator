@@ -6,6 +6,8 @@ use crate::{
 };
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::ops;
+
 const DBG_WN: &str = "winding numbers";
 
 pub enum WindingRule {
@@ -15,14 +17,39 @@ pub enum WindingRule {
     Negative,
 }
 
-impl WindingRule {
-    fn is_inside(&self, winding_number: i32) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FillMode {
+    /// If a region describes an area inside the polygon
+    Filled,
+    /// If a region describes an area outside the polygon
+    Hole,
+}
+
+impl ops::Not for FillMode {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
         match self {
+            FillMode::Hole => FillMode::Filled,
+            FillMode::Filled => FillMode::Hole,
+        }
+    }
+}
+
+impl WindingRule {
+    fn get_fill_mode(&self, winding_number: i32) -> FillMode {
+        let inside = match self {
             Self::Odd => winding_number % 2 == 1,
             Self::NonZero => winding_number != 0,
             Self::Positive => winding_number > 0,
             Self::Negative => winding_number < 0,
-        }
+        };
+
+        return if inside {
+            FillMode::Filled
+        } else {
+            FillMode::Hole
+        };
     }
 }
 
@@ -187,23 +214,11 @@ impl<'a> SweepState<'a> {
     }
 }
 
-pub enum FillMode {
-    /// If a region describes an area inside the polygon
-    Filled,
-    /// If a region describes an area outside the polygon
-    Hole,
-}
-
-pub struct RegionId {
-    island: usize,
-    region: usize,
-}
-
-pub fn calculate_regions_inside(
-    islands: &[Island],
+fn calculate_regions_inside(
+    islands: &mut [Island],
     contours: &[Contour],
     winding_rule: WindingRule,
-) -> Vec<RegionId> {
+) {
     debugp!(DBG_WN, "# Start calculate_regions_inside");
 
     // find leftmost point for each region and put in lookup map
@@ -240,7 +255,6 @@ pub fn calculate_regions_inside(
     });
 
     // run plane sweep to calculate winding numbers
-    let mut regions_inside = Vec::new();
     let mut sweep_state = SweepState {
         contours: &contours,
         edges: Vec::new(),
@@ -262,20 +276,15 @@ pub fn calculate_regions_inside(
                     // then we calculate the winding number
                     let winding_number = sweep_state
                         .calculate_winding_number(region_entry.upper_from, region_entry.upper_to);
-                    let inside = winding_rule.is_inside(winding_number);
-                    if inside {
-                        regions_inside.push(RegionId {
-                            island: region_entry.island,
-                            region: region_entry.region,
-                        });
-                    }
+                    islands[region_entry.island].interior_fill_mode[region_entry.region] =
+                        Some(winding_rule.get_fill_mode(winding_number));
                     debugp!(
                         DBG_WN,
-                        "Region ({}, {}) has winding number {} and is inside: {}",
+                        "Region ({}, {}) has winding number {} and is inside: {:?}",
                         region_entry.island,
                         region_entry.region,
                         winding_number,
-                        inside
+                        winding_rule.get_fill_mode(winding_number)
                     );
                 }
             }
@@ -290,8 +299,13 @@ pub fn calculate_regions_inside(
         };
     }
 
+    for island in &mut *islands {
+        println!("Fill mode: {:?}", island.interior_fill_mode);
+    }
+    debug_assert!(islands
+        .iter()
+        .all(|i| i.interior_fill_mode.iter().all(|o| o.is_some())));
     debugp!(DBG_WN, "# End calculate_regions_inside");
-    return regions_inside;
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -314,29 +328,30 @@ fn categorize_point(prev: Vector2f, point: Vector2f, next: Vector2f) -> PointTyp
     };
 }
 
-pub struct Island {
-    pub graph: Graph,
+struct Island {
+    graph: Graph,
     // runs CCW
-    pub outline: Contour,
+    outline: Contour,
     // runs CW
-    pub interior: Vec<Contour>,
+    interior: Vec<Contour>,
+    interior_fill_mode: Vec<Option<FillMode>>,
 }
 
-pub struct IslandNode {
-    pub island: usize,
-    pub interior: Vec<InteriorNode>,
+struct IslandNode {
+    island: Island,
+    interior: Vec<InteriorNode>,
 }
 
-pub struct InteriorNode {
-    pub children: Vec<IslandNode>,
+struct InteriorNode {
+    children: Vec<IslandNode>,
 }
 
 /// Creates a hierarchy of regions that describes which regions contain which other ones.
 /// `regions` is a sequence of CCW regions each followed by one or more CW regions.
 /// The regions are provided in increasing min-y-coordinate.
-pub fn build_region_hierarchy(islands: &[Island]) -> Vec<IslandNode> {
+fn build_region_hierarchy(islands: Vec<Island>) -> Vec<IslandNode> {
     let mut island_nodes = Vec::with_capacity(islands.len());
-    for (island_idx, island) in islands.iter().enumerate() {
+    for island in islands {
         let mut interior_nodes = Vec::with_capacity(island.interior.len());
         for _ in 0..island.interior.len() {
             interior_nodes.push(InteriorNode {
@@ -344,16 +359,16 @@ pub fn build_region_hierarchy(islands: &[Island]) -> Vec<IslandNode> {
             })
         }
         island_nodes.push(IslandNode {
-            island: island_idx,
+            island,
             interior: interior_nodes,
         })
     }
 
-    build_hierarchy_from_island_nodes(islands, &mut island_nodes);
+    build_hierarchy_from_island_nodes(&mut island_nodes);
     return island_nodes;
 }
 
-fn build_hierarchy_from_island_nodes(islands: &[Island], island_nodes: &mut Vec<IslandNode>) {
+fn build_hierarchy_from_island_nodes(island_nodes: &mut Vec<IslandNode>) {
     // check all island nodes with each other and move inside if contained
     let mut container_idx = 0;
     while container_idx < island_nodes.len() {
@@ -365,7 +380,6 @@ fn build_hierarchy_from_island_nodes(islands: &[Island], island_nodes: &mut Vec<
             }
 
             if let Some(interior_node_idx) = find_interior_node_containing_island_node(
-                islands,
                 &island_nodes[container_idx],
                 &island_nodes[containee_idx],
             ) {
@@ -390,26 +404,22 @@ fn build_hierarchy_from_island_nodes(islands: &[Island], island_nodes: &mut Vec<
     // repeat build hierarchy for all children for multiple nesting
     for island_node in island_nodes {
         for interior_node in &mut island_node.interior {
-            build_hierarchy_from_island_nodes(islands, &mut interior_node.children);
+            build_hierarchy_from_island_nodes(&mut interior_node.children);
         }
     }
 }
 
 fn find_interior_node_containing_island_node(
-    islands: &[Island],
     container: &IslandNode,
     containee: &IslandNode,
 ) -> Option<usize> {
-    if !are_regions_nested(
-        &islands[container.island].outline,
-        &islands[containee.island].outline,
-    ) {
+    if !are_regions_nested(&container.island.outline, &containee.island.outline) {
         return None;
     }
 
     for idx in 0..container.interior.len() {
-        let region = &islands[container.island].interior[idx];
-        let outline = &islands[containee.island].outline;
+        let region = &container.island.interior[idx];
+        let outline = &containee.island.outline;
         if are_regions_nested(region, outline) {
             return Some(idx);
         }
@@ -420,6 +430,32 @@ fn find_interior_node_containing_island_node(
 
 fn are_regions_nested(container: &Contour, containee: &Contour) -> bool {
     return polygon::calculate_winding_number(container, containee[0]) != 0;
+}
+
+fn decompose_hierarchy(island_node: IslandNode) {
+    // for each region that is filled
+    // find all interior regions that are not visible
+    // get the outline of those
+}
+
+pub fn decompose(graph: Graph, subdivided_contours: &[Contour], winding_rule: WindingRule) {
+    let island_graphs = graph.clone().split_by_islands();
+    let mut islands: Vec<_> = island_graphs
+        .into_iter()
+        .map(|mut graph| {
+            let (outline, interior) = graph.trace_regions();
+            Island {
+                graph,
+                outline,
+                interior_fill_mode: vec![None; interior.len()],
+                interior,
+            }
+        })
+        .collect();
+
+    calculate_regions_inside(&mut islands, &subdivided_contours, winding_rule);
+
+    let hierarchy = build_region_hierarchy(islands);
 }
 
 #[cfg(test)]
