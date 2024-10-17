@@ -9,12 +9,10 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct Node {
     position: Vector2f,
-    // node is marked dirty whenever a new edge is inserted
-    dirty: bool,
-    // edges, ordered CCW when not dirty
+    // edges, arbirary order, when tracing regions it is reodered to go CCW
     edges: Vec<usize>,
     // look up index of edge by edge value (=neighbor index)
-    // only valid when not dirty
+    // is only initialized before tracing regions
     edge_to_edge_idx: HashMap<usize, usize>,
     // when tracing regions this stores whether the edge was traced along
     // note: this is per direction as the connected node will point back
@@ -25,7 +23,6 @@ impl Node {
     fn new(position: Vector2f) -> Node {
         Node {
             position,
-            dirty: false,
             edges: Vec::new(),
             edge_to_edge_idx: HashMap::new(),
             traced_edges: Vec::new(),
@@ -34,15 +31,21 @@ impl Node {
 
     fn add_edge(&mut self, edge: usize) -> bool {
         if !self.edges.contains(&edge) {
-            self.dirty = true;
             self.edges.push(edge);
             return true;
         }
         return false;
     }
 
+    fn remove_edge(&mut self, edge: usize) -> bool {
+        if let Some(idx) = self.edges.iter().position(|&e| e == edge) {
+            self.edges.remove(idx);
+            return true;
+        }
+        return false;
+    }
+
     fn next_edge_ccw(&self, current_idx: usize) -> usize {
-        debug_assert!(!self.dirty);
         if current_idx >= self.edges.len() {
             panic!("Edge index out of bounds")
         }
@@ -81,8 +84,10 @@ impl Graph {
         let from_idx = self.get_or_insert_node(from);
         let to_idx = self.get_or_insert_node(to);
 
-        self.nodes[from_idx].add_edge(to_idx);
-        self.nodes[to_idx].add_edge(from_idx);
+        let added_from = self.nodes[from_idx].add_edge(to_idx);
+        let added_to = self.nodes[to_idx].add_edge(from_idx);
+
+        debug_assert!(added_from == added_to);
     }
 
     fn get_or_insert_node(&mut self, position: Vector2f) -> usize {
@@ -98,11 +103,65 @@ impl Graph {
         return index;
     }
 
+    pub fn remove_segment(&mut self, from: Vector2f, to: Vector2f) -> bool {
+        if from == to {
+            return false;
+        }
+
+        let from_idx = self.get_or_insert_node(from);
+        let to_idx = self.get_or_insert_node(to);
+
+        let removed_from = self.nodes[from_idx].remove_edge(to_idx);
+        let removed_to = self.nodes[to_idx].remove_edge(from_idx);
+
+        debug_assert!(removed_from == removed_to);
+
+        return removed_from;
+    }
+
+    /// Trims off nodes with only one edge, and nodes that will have
+    /// one edge after trimming of those nodes.
+    pub fn trim_pendant_paths(&mut self) -> bool {
+        let mut removed = false;
+
+        for i in 0..self.nodes.len() {
+            if self.trim_pendant_path(i) {
+                removed = true;
+            }
+        }
+
+        return removed;
+    }
+
+    fn trim_pendant_path(&mut self, mut node_idx: usize) -> bool {
+        let mut removed = false;
+
+        while self.nodes[node_idx].edges.len() == 1 {
+            let neighbor_idx = self.nodes[node_idx].edges[0];
+            self.remove_segment(
+                self.nodes[node_idx].position,
+                self.nodes[neighbor_idx].position,
+            );
+            node_idx = neighbor_idx;
+
+            removed = true;
+        }
+
+        return removed;
+    }
+
     pub fn split_by_islands(mut self) -> Vec<Graph> {
         let mut node_moved_out = vec![false; self.nodes.len()];
         let mut subgraphs = Vec::new();
 
+        let num_empty_nodes = self.nodes.iter().filter(|n| n.edges.is_empty()).count();
+
         for node_idx in 0..node_moved_out.len() {
+            // skip nodes that had all their edges deleted
+            if self.nodes[node_idx].edges.is_empty() {
+                continue;
+            }
+
             if node_moved_out[node_idx] {
                 continue;
             }
@@ -142,7 +201,10 @@ impl Graph {
             });
         }
 
-        debug_assert!(self.nodes.len() == subgraphs.iter().map(|g| g.nodes.len()).sum());
+        // subgraphs should have as many nodes as original graph minus nodes that had all their edges removed
+        debug_assert!(
+            self.nodes.len() - num_empty_nodes == subgraphs.iter().map(|g| g.nodes.len()).sum()
+        );
 
         #[cfg(debug_assertions)]
         for subgraph in &subgraphs {
@@ -199,10 +261,6 @@ impl Graph {
         // clean up nodes: sort edges in CCW order and create edge reverse lookup
         let nodes_ptr = self.nodes.as_ptr();
         for node in &mut self.nodes {
-            if !node.dirty {
-                continue;
-            }
-
             node.edges.sort_by(|n1, n2| {
                 let n1 = unsafe { &*(nodes_ptr.add(*n1)) };
                 let n2 = unsafe { &*(nodes_ptr.add(*n2)) };
@@ -217,13 +275,13 @@ impl Graph {
             for (i, &edge) in node.edges.iter().enumerate() {
                 node.edge_to_edge_idx.insert(edge, i);
             }
-
-            node.dirty = false;
         }
 
         // angle 0 points in +X direction, with edges going CCW
         // -> start tracing with node of lowest y-value to ensure the first region is the outline
         let node_idx_min_y = (0..self.nodes.len())
+            // filter out nodes that had all their edges deleted
+            .filter(|&i| !&self.nodes[i].edges.is_empty())
             .min_by(|&i, &j| f32::total_cmp(&self.nodes[i].position.y, &self.nodes[j].position.y))
             .unwrap();
 
@@ -336,6 +394,9 @@ pub fn build_graph(subdivided_contours: &[Contour]) -> Graph {
             graph.insert_segment(contour[current], contour[next]);
         }
     }
+
+    // trim pendant paths as they will pose a problem with region tracing otherwise
+    graph.trim_pendant_paths();
 
     return graph;
 }

@@ -391,7 +391,6 @@ fn draw_triangulations<'a, T>(
     d: &mut RaylibMode2D<'a, T>,
     triangluations: &Vec<(Contour, Vec<Triangle>)>,
 ) {
-    println!("draw");
     let mut color_idx = 0;
     for (c, triangles) in triangluations {
         for t in triangles {

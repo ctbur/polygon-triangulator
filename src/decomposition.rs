@@ -2,14 +2,15 @@ use crate::{
     debugp,
     graph::Graph,
     polygon::{self, Contour},
-    vector2::{self, Vector2f},
+    vector2::{self, comp_points_x_dir, Vector2f, Vector2fBits},
 };
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::ops;
+use std::{mem, ops};
 
 const DBG_WN: &str = "winding numbers";
 
+#[derive(Clone, Copy)]
 pub enum WindingRule {
     Odd,
     NonZero,
@@ -432,13 +433,108 @@ fn are_regions_nested(container: &Contour, containee: &Contour) -> bool {
     return polygon::calculate_winding_number(container, containee[0]) != 0;
 }
 
-fn decompose_hierarchy(island_node: IslandNode) {
-    // for each region that is filled
-    // find all interior regions that are not visible
-    // get the outline of those
+fn dissolve_redundant_edges(
+    mut island_node: IslandNode,
+    surrounding_fill_mode: FillMode,
+    out: &mut Vec<Island>,
+) {
+    // creates unique hashable ID from segment in contour edge
+    fn get_segment_id(contour: &Contour, i: usize) -> (Vector2fBits, Vector2fBits) {
+        let j = (i + 1) % contour.len();
+
+        let (a, b) = if comp_points_x_dir(contour[i], contour[j]).is_lt() {
+            (contour[i], contour[j])
+        } else {
+            (contour[j], contour[i])
+        };
+
+        return (Vector2f::to_bits(a), Vector2f::to_bits(b));
+    }
+
+    let mut segment_map = HashMap::new();
+    let mut test_map = HashMap::new();
+
+    for i in 0..island_node.island.outline.len() {
+        let segment_id = get_segment_id(&island_node.island.outline, i);
+        segment_map.insert(segment_id, surrounding_fill_mode);
+        *test_map.entry(segment_id).or_insert(0) += 1;
+    }
+
+    for (region_idx, region) in island_node.island.interior.iter().enumerate() {
+        for i in 0..region.len() {
+            let segment_id = get_segment_id(&island_node.island.interior[region_idx], i);
+            *test_map.entry(segment_id).or_insert(0) += 1;
+            let fill_mode = island_node.island.interior_fill_mode[region_idx].unwrap();
+
+            if let Some(neighbor_fill_mode) = segment_map.remove(&segment_id) {
+                if fill_mode == neighbor_fill_mode {
+                    island_node
+                        .island
+                        .graph
+                        .remove_segment(region[i], region[(i + 1) % region.len()]);
+                }
+            } else {
+                segment_map.insert(segment_id, fill_mode);
+            }
+        }
+
+        // no pendant paths should remain after this if regions were removed properly
+        debug_assert!(!island_node.island.graph.trim_pendant_paths());
+    }
+
+    let island_graphs = island_node.island.graph.split_by_islands();
+    for mut graph in island_graphs {
+        let (outline, interior) = graph.trace_regions();
+        out.push(Island {
+            graph,
+            outline,
+            interior_fill_mode: vec![None; interior.len()],
+            interior,
+        });
+    }
+
+    for (region_idx, interior_node) in island_node.interior.into_iter().enumerate() {
+        for child in interior_node.children {
+            let fill_mode = island_node.island.interior_fill_mode[region_idx].unwrap();
+            dissolve_redundant_edges(child, fill_mode, out);
+        }
+    }
 }
 
-pub fn decompose(graph: Graph, subdivided_contours: &[Contour], winding_rule: WindingRule) {
+pub struct FilledRegion {
+    region: Contour,
+    holes: Vec<Contour>,
+}
+
+fn decompose_hierarchy(mut island_node: IslandNode, filled_regions: &mut Vec<FilledRegion>) {
+    for (region_idx, mut interior_node) in island_node.interior.into_iter().enumerate() {
+        if island_node.island.interior_fill_mode[region_idx].unwrap() == FillMode::Filled {
+            let mut holes = Vec::new();
+            for child in &mut interior_node.children {
+                // move out outline - we don't need it anymore, only the regions
+                let hole = mem::replace(&mut child.island.outline, Vec::new());
+                // the outlines of all child nodes must be holes, otherwise the edges would have
+                // been dissolved in dissolve_redundant_edges as they don't mark a transition
+                // from filled -> hole
+                holes.push(hole);
+            }
+
+            let region = mem::replace(&mut island_node.island.interior[region_idx], Vec::new());
+            filled_regions.push(FilledRegion { region, holes });
+
+            // traverse all children
+            for child in interior_node.children {
+                decompose_hierarchy(child, filled_regions);
+            }
+        }
+    }
+}
+
+pub fn decompose(
+    graph: Graph,
+    subdivided_contours: &[Contour],
+    winding_rule: WindingRule,
+) -> Vec<FilledRegion> {
     let island_graphs = graph.clone().split_by_islands();
     let mut islands: Vec<_> = island_graphs
         .into_iter()
@@ -454,8 +550,21 @@ pub fn decompose(graph: Graph, subdivided_contours: &[Contour], winding_rule: Wi
         .collect();
 
     calculate_regions_inside(&mut islands, &subdivided_contours, winding_rule);
-
     let hierarchy = build_region_hierarchy(islands);
+
+    let mut simplified_islands = Vec::new();
+    for island_node in hierarchy {
+        dissolve_redundant_edges(island_node, FillMode::Hole, &mut simplified_islands);
+    }
+
+    calculate_regions_inside(&mut simplified_islands, &subdivided_contours, winding_rule);
+    let simplified_hierachy = build_region_hierarchy(simplified_islands);
+
+    let mut filled_regions = Vec::new();
+    for island_node in simplified_hierachy {
+        decompose_hierarchy(island_node, &mut filled_regions);
+    }
+    return filled_regions;
 }
 
 #[cfg(test)]
